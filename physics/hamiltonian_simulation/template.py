@@ -65,6 +65,7 @@ def run_function(
     # Do this at the top of the program so it fails early if any required
     # arguments are missing or invalid.
     dry_run = kwargs.get("dry_run", False)
+    testing_backend = kwargs.get("testing_backend", None)
 
     # Stop if this fidelity is achieved
     aqc_stopping_fidelity = kwargs.get("aqc_stopping_fidelity", 1.0)
@@ -72,11 +73,15 @@ def run_function(
     aqc_max_iterations = kwargs.get("aqc_max_iterations", 500)
     initial_state = kwargs.get("initial_state", QuantumCircuit(hamiltonian.num_qubits))
 
-    # Initialize Qiskit Runtime Service
-    print("starting runtime service")
-    service = QiskitRuntimeService(channel="ibm_quantum")
-    backend = service.backend(backend_name)
-    print("backend", backend)
+    if testing_backend is None:
+        # Initialize Qiskit Runtime Service
+        print("Starting runtime service")
+        service = QiskitRuntimeService(channel="ibm_quantum")
+        backend = service.backend(backend_name)
+        print("backend", backend)
+    else:
+        backend = testing_backend
+
     # Configure `EstimatorOptions`, to control the parameters of the hardware
     # experiment.
     # Set default options.

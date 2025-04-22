@@ -20,6 +20,8 @@ import numpy as np
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import SparsePauliOp
 
+from qiskit_ibm_runtime.fake_provider import FakeFez
+
 from physics.hamiltonian_simulation import run_function
 from test.base import BaseTestCase
 
@@ -63,7 +65,6 @@ class TestHamiltonianSimulation(BaseTestCase):
     def test_inputs(self):
 
         out = run_function(
-            dry_run=True,
             initial_state=self.initial_state,
             hamiltonian=self.hamiltonian,
             observable=self.observable,
@@ -75,6 +76,8 @@ class TestHamiltonianSimulation(BaseTestCase):
             remainder_evolution_time=0.2,
             remainder_num_trotter_steps=4,
             aqc_max_iterations=300,
+            dry_run=True,
+            testing_backend=FakeFez(),
         )
         self.assertEqual(out.get("num_aqc_parameters"), 816)
         self.assertEqual(out.get("aqc_starting_fidelity"), 0.9914382555617057)
