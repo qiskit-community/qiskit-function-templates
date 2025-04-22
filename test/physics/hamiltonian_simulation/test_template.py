@@ -1,0 +1,83 @@
+# This code is part of a Qiskit project.
+#
+# (C) Copyright IBM 2025
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+"""
+Hamiltonian Simulation Function Template unit tests.
+"""
+
+from itertools import chain
+import numpy as np
+
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import SparsePauliOp
+
+from physics.hamiltonian_simulation import run_function
+from test.base import BaseTestCase
+
+
+class TestHamiltonianSimulation(BaseTestCase):
+    """
+    Test Hamiltonian Simulation
+    """
+
+    def setUp(self):
+        super().setUp()
+        np.random.seed(0)
+        L = 50
+        # Generate the edge list for this spin-chain
+        edges = [(i, i + 1) for i in range(L - 1)]
+        # Generate an edge-coloring so we can make hw-efficient circuits
+        edges = edges[::2] + edges[1::2]
+        # Generate random coefficients for our XXZ Hamiltonian
+        Js = np.random.rand(L - 1) + 0.5 * np.ones(L - 1)
+        self.hamiltonian = SparsePauliOp.from_sparse_list(
+            chain.from_iterable(
+                [
+                    [
+                        ("XX", (i, j), Js[i] / 2),
+                        ("YY", (i, j), Js[i] / 2),
+                        ("ZZ", (i, j), Js[i]),
+                    ]
+                    for i, j in edges
+                ]
+            ),
+            num_qubits=L,
+        )
+        self.observable = SparsePauliOp.from_sparse_list(
+            [("ZZ", (L // 2 - 1, L // 2), 1.0)], num_qubits=L
+        )
+        self.initial_state = QuantumCircuit(L)
+        for i in range(L):
+            if i % 2:
+                self.initial_state.x(i)
+
+    def test_inputs(self):
+
+        out = run_function(
+            dry_run=True,
+            initial_state=self.initial_state,
+            hamiltonian=self.hamiltonian,
+            observable=self.observable,
+            backend_name="ibm_fez",
+            estimator_options={},
+            aqc_evolution_time=0.2,
+            aqc_ansatz_num_trotter_steps=1,
+            aqc_target_num_trotter_steps=32,
+            remainder_evolution_time=0.2,
+            remainder_num_trotter_steps=4,
+            aqc_max_iterations=300,
+        )
+        self.assertEqual(out.get("num_aqc_parameters"), 816)
+        self.assertEqual(out.get("aqc_starting_fidelity"), 0.9914382555617057)
+        self.assertEqual(out.get("num_iterations"), 55)
+        self.assertEqual(out.get("aqc_fidelity"), 0.9997820314575582)
+        self.assertEqual(out.get("twoqubit_depth"), 33)

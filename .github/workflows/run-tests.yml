@@ -1,0 +1,39 @@
+---
+name: Tests
+on:
+  push:
+    branches: [ main, 'stable/*' ]
+  pull_request:
+    branches: [ main, 'stable/*' ]
+  merge_group:
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.ref }}-${{ github.head_ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    if: github.repository_owner == 'qiskit-community'
+    name: ${{ matrix.os }}-arm64-tests-Python-${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+        os: ["macOS-14", "ubuntu-24.04-arm"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: arm64
+      - name: 'Install dependencies'
+        run: |
+          python -m pip install -U -r requirements.txt -c constraints.txt
+          python -m pip install -U -r requirements-dev.txt -c constraints.txt
+          python -m pip install -U -r physics/hamiltonian_simulation/requirements-dev.txt -c constraints.txt
+      - name: 'Run tests'
+        run: stestr --test-path test/physics/hamiltonian_simulation run
+        env:
+          QISKIT_PARALLEL: FALSE
+          QISKIT_IGNORE_USER_SETTINGS: TRUE
