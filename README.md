@@ -16,19 +16,22 @@
 
 ### About
 
-The Qiskit Function Templates are a collection of open-source quantum application implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless) that can be used as reference for future Qiskit Function implementations.
+This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless) that you can use as reference for developing custom [Qiskit Functions](https://docs.quantum.ibm.com/guides/functions), or to explore how to leverage specific function implementations in your own project.
 
-The repository serves two purposes:
+#### Templates
+Qiskit Function *templates* allow to kickstart the [Qiskit Function](https://docs.quantum.ibm.com/guides/functions) development process with best-practices in interface development, code formatting, unit testing, and more. The repository itself is exposed as a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository), so the CI/CD implementation can be easily extended by implementers to match new projects.
 
-1. It shows how to leverage combinations of Qiskit ecosystem tools (The Qiskit SDK, the Qiskit Serverless package, and different Qiskit Addons) to enable industry-relevant application workflows.
-2. It kickstarts the Qiskit Function development process by sharing best-practices in interface development, testing, code formatting, CI/CD implementation... The repository is a GitHub template, which allows to easily use as reference for new repositories. 
+There are currently two templates: a circuit function template and an application function template.
 
-The package is structured by application area, currently:
+<img src="image.png" alt="image" width="500"/>
+
+#### Template Implementations
+Qiskit Function *template implementations* show different realizations of the application function template above that leverage [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons) to run industry-relevant application workflows. These implementations are structured by application area, currently:
 
 - `physics`
 - `chemistry`
 
-Each template serverless entry point is contained within a directory in the corresponding application area, for example, for the hamiltonian simulation template: `physics/hamiltonian_simulation/template.py`. The directory might contain additional files that can be uploaded to the serverless environment for the function execution.
+Each implementation is contained in a directory in the corresponding application area, for example, for the hamiltonian simulation function: `physics/hamiltonian_simulation/template.py`. The directory might contain additional files that can be uploaded to the serverless environment for the function execution.
 
 ----------------------------------------------------------------------------------------------------
 

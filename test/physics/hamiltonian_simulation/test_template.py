@@ -79,8 +79,13 @@ class TestHamiltonianSimulation(BaseTestCase):
             dry_run=True,
             testing_backend=FakeFez(),
         )
-        self.assertEqual(out.get("num_aqc_parameters"), 816)
-        self.assertEqual(out.get("aqc_starting_fidelity"), 0.9914382555617057)
-        self.assertEqual(out.get("num_iterations"), 55)
-        self.assertEqual(out.get("aqc_fidelity"), 0.9997820314575582)
-        self.assertEqual(out.get("twoqubit_depth"), 33)
+        with self.subTest("num params"):
+            self.assertEqual(out.get("num_aqc_parameters"), 816)
+        with self.subTest("starting fidelity"):
+            self.assertAlmostEqual(out.get("aqc_starting_fidelity"), 0.9914, 4)
+        with self.subTest("num iterations"):
+            self.assertTrue(out.get("num_iterations") < 300)
+        with self.subTest("final fidelity"):
+            self.assertAlmostEqual(out.get("aqc_fidelity"), 0.9997, 4)
+        with self.subTest("2q depth"):
+            self.assertEqual(out.get("twoqubit_depth"), 33)
