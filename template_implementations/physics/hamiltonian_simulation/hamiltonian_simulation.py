@@ -16,6 +16,7 @@ Hamiltonian Simulation Function Template source code.
 import datetime
 import json
 import os
+import logging
 import traceback
 import numpy as np
 
@@ -40,6 +41,8 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 
 from qiskit_serverless import get_arguments, save_result
+
+logger = logging.getLogger(__name__)
 
 
 # pylint: disable=too-many-arguments
@@ -75,10 +78,10 @@ def run_function(
 
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
-        print("Starting runtime service")
+        logger.info("Starting runtime service")
         service = QiskitRuntimeService(channel="ibm_quantum")
         backend = service.backend(backend_name)
-        print("backend", backend)
+        logger.info("backend", backend)
     else:
         backend = testing_backend
 
@@ -114,7 +117,7 @@ def run_function(
     # When the function template is running, it is helpful to return
     # information in the logs by using print statements, so that you can better
     # evaluate the workload's progress. This example returns the estimator options.
-    print("estimator_options =", json.dumps(estimator_options, indent=4))
+    logger.info("estimator_options =", json.dumps(estimator_options, indent=4))
 
     # Perform parameter validation
     if not 0.0 < aqc_stopping_fidelity <= 1.0:
@@ -130,8 +133,8 @@ def run_function(
 
     # Step 1: Map
     os.environ["NUMBA_CACHE_DIR"] = "/data"
-    print("Hamiltonian:", hamiltonian)
-    print("Observable:", observable)
+    logger.info("Hamiltonian:", hamiltonian)
+    logger.info("Observable:", observable)
     simulator_settings = QuimbSimulator(quimb.tensor.CircuitMPS, autodiff_backend="jax")
 
     # Construct the AQC target circuit
@@ -148,7 +151,7 @@ def run_function(
 
     # Construct matrix-product state representation of the AQC target state
     aqc_target_mps = tensornetwork_from_circuit(aqc_target_circuit, simulator_settings)
-    print("Target MPS maximum bond dimension:", aqc_target_mps.psi.max_bond())
+    logger.info("Target MPS maximum bond dimension:", aqc_target_mps.psi.max_bond())
     output["target_bond_dimension"] = aqc_target_mps.psi.max_bond()
 
     # Generate an ansatz and initial parameters from a Trotter circuit with fewer steps
@@ -163,19 +166,19 @@ def run_function(
             inplace=True,
         )
     aqc_ansatz, aqc_initial_parameters = generate_ansatz_from_circuit(aqc_good_circuit)
-    print("Number of AQC parameters:", len(aqc_initial_parameters))
+    logger.info("Number of AQC parameters:", len(aqc_initial_parameters))
     output["num_aqc_parameters"] = len(aqc_initial_parameters)
 
     # Calculate the fidelity of ansatz circuit vs. the target state, before optimization
     good_mps = tensornetwork_from_circuit(aqc_good_circuit, simulator_settings)
     starting_fidelity = abs(compute_overlap(good_mps, aqc_target_mps)) ** 2
-    print("Starting fidelity of AQC portion:", starting_fidelity)
+    logger.info("Starting fidelity of AQC portion:", starting_fidelity)
     output["aqc_starting_fidelity"] = starting_fidelity
 
     # Optimize the ansatz parameters by using MPS calculations
     def callback(intermediate_result: OptimizeResult):
         fidelity = 1 - intermediate_result.fun
-        print(f"{datetime.datetime.now()} Intermediate result: Fidelity {fidelity:.8f}")
+        logger.info(f"{datetime.datetime.now()} Intermediate result: Fidelity {fidelity:.8f}")
         if intermediate_result.fun < stopping_point:
             raise StopIteration
 
@@ -196,7 +199,7 @@ def run_function(
         99,
     ):  # 0 => success; 1 => max iterations reached; 99 => early termination via StopIteration
         raise RuntimeError(f"Optimization failed: {result.message} (status={result.status})")
-    print(f"Done after {result.nit} iterations.")
+    logger.info(f"Done after {result.nit} iterations.")
     output["num_iterations"] = result.nit
     aqc_final_parameters = result.x
     output["aqc_final_parameters"] = list(aqc_final_parameters)
@@ -207,7 +210,7 @@ def run_function(
     # Calculate fidelity after optimization
     aqc_final_mps = tensornetwork_from_circuit(aqc_final_circuit, simulator_settings)
     aqc_fidelity = abs(compute_overlap(aqc_final_mps, aqc_target_mps)) ** 2
-    print("Fidelity of AQC portion:", aqc_fidelity)
+    logger.info("Fidelity of AQC portion:", aqc_fidelity)
     output["aqc_fidelity"] = aqc_fidelity
 
     # Construct final circuit, with remainder of time evolution
@@ -228,12 +231,12 @@ def run_function(
     isa_observable = observable.apply_layout(isa_circuit.layout)
 
     isa_2qubit_depth = isa_circuit.depth(lambda x: x.operation.num_qubits == 2)
-    print("ISA circuit two-qubit depth:", isa_2qubit_depth)
+    logger.info("ISA circuit two-qubit depth:", isa_2qubit_depth)
     output["twoqubit_depth"] = isa_2qubit_depth
 
     # Exit now if dry run; don't execute on hardware
     if dry_run:
-        print("Exiting before hardware execution since `dry_run` is True.")
+        logger.info("Exiting before hardware execution since `dry_run` is True.")
         return output
 
     # Step 3: Execute on Hardware
@@ -242,7 +245,7 @@ def run_function(
     # Submit the underlying Estimator job. Note that this is not the
     # actual function job.
     job = estimator.run([(isa_circuit, isa_observable)])
-    print("Job ID:", job.job_id())
+    logger.info("Job ID:", job.job_id())
     output["job_id"] = job.job_id()
 
     # Wait until job is complete
@@ -256,7 +259,7 @@ def run_function(
     hw_expvals = [pub_result_data["evs"].tolist() for pub_result_data in hw_results_dicts]
 
     # Return expectation values in serializable format
-    print("Hardware expectation values", hw_expvals)
+    logger.info("Hardware expectation values", hw_expvals)
     output["hw_expvals"] = hw_expvals[0]
     return output
 
