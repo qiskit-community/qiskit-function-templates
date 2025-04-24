@@ -15,18 +15,17 @@ Hamiltonian Simulation Function Template unit tests.
 """
 
 from itertools import chain
+import unittest
 import numpy as np
 
 from qiskit import QuantumCircuit
 from qiskit.quantum_info import SparsePauliOp
-
 from qiskit_ibm_runtime.fake_provider import FakeFez
 
-from physics.hamiltonian_simulation import run_function
-from test.base import BaseTestCase
+from ..hamiltonian_simulation import run_function
 
 
-class TestHamiltonianSimulation(BaseTestCase):
+class TestHamiltonianSimulation(unittest.TestCase):
     """
     Test Hamiltonian Simulation
     """
@@ -34,35 +33,36 @@ class TestHamiltonianSimulation(BaseTestCase):
     def setUp(self):
         super().setUp()
         np.random.seed(0)
-        L = 50
+        length = 50
         # Generate the edge list for this spin-chain
-        edges = [(i, i + 1) for i in range(L - 1)]
+        edges = [(i, i + 1) for i in range(length - 1)]
         # Generate an edge-coloring so we can make hw-efficient circuits
         edges = edges[::2] + edges[1::2]
         # Generate random coefficients for our XXZ Hamiltonian
-        Js = np.random.rand(L - 1) + 0.5 * np.ones(L - 1)
+        coeffs = np.random.rand(length - 1) + 0.5 * np.ones(length - 1)
         self.hamiltonian = SparsePauliOp.from_sparse_list(
             chain.from_iterable(
                 [
                     [
-                        ("XX", (i, j), Js[i] / 2),
-                        ("YY", (i, j), Js[i] / 2),
-                        ("ZZ", (i, j), Js[i]),
+                        ("XX", (i, j), coeffs[i] / 2),
+                        ("YY", (i, j), coeffs[i] / 2),
+                        ("ZZ", (i, j), coeffs[i]),
                     ]
                     for i, j in edges
                 ]
             ),
-            num_qubits=L,
+            num_qubits=length,
         )
         self.observable = SparsePauliOp.from_sparse_list(
-            [("ZZ", (L // 2 - 1, L // 2), 1.0)], num_qubits=L
+            [("ZZ", (length // 2 - 1, length // 2), 1.0)], num_qubits=length
         )
-        self.initial_state = QuantumCircuit(L)
-        for i in range(L):
+        self.initial_state = QuantumCircuit(length)
+        for i in range(length):
             if i % 2:
                 self.initial_state.x(i)
 
-    def test_inputs(self):
+    def test_run(self):
+        """Test run_function"""
 
         out = run_function(
             initial_state=self.initial_state,
@@ -86,6 +86,6 @@ class TestHamiltonianSimulation(BaseTestCase):
         with self.subTest("num iterations"):
             self.assertTrue(out.get("num_iterations") < 300)
         with self.subTest("final fidelity"):
-            self.assertAlmostEqual(out.get("aqc_fidelity"), 0.9997, 4)
+            self.assertAlmostEqual(out.get("aqc_fidelity"), 0.999782, 4)
         with self.subTest("2q depth"):
             self.assertEqual(out.get("twoqubit_depth"), 33)

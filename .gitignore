@@ -5,3 +5,4 @@ venv*
 .tox/
 .stestr/
 *.DS_Store*
+*.egg-info*

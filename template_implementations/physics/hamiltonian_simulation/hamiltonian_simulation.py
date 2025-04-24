@@ -109,9 +109,7 @@ def run_function(
         },
     }
     # Merge with user-provided options
-    estimator_options = merge(
-        kwargs.get("estimator_options", {}), estimator_default_options
-    )
+    estimator_options = merge(kwargs.get("estimator_options", {}), estimator_default_options)
 
     # When the function template is running, it is helpful to return
     # information in the logs by using print statements, so that you can better
@@ -197,9 +195,7 @@ def run_function(
         1,
         99,
     ):  # 0 => success; 1 => max iterations reached; 99 => early termination via StopIteration
-        raise RuntimeError(
-            f"Optimization failed: {result.message} (status={result.status})"
-        )
+        raise RuntimeError(f"Optimization failed: {result.message} (status={result.status})")
     print(f"Done after {result.nit} iterations.")
     output["num_iterations"] = result.nit
     aqc_final_parameters = result.x
@@ -257,9 +253,7 @@ def run_function(
     output["hw_results"] = hw_results_dicts
 
     # Reorganize expectation values
-    hw_expvals = [
-        pub_result_data["evs"].tolist() for pub_result_data in hw_results_dicts
-    ]
+    hw_expvals = [pub_result_data["evs"].tolist() for pub_result_data in hw_results_dicts]
 
     # Return expectation values in serializable format
     print("Hardware expectation values", hw_expvals)

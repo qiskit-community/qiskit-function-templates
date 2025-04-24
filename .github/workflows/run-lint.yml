@@ -1,0 +1,47 @@
+---
+name: Lint & Black
+on:
+  push:
+    branches: [ main]
+  pull_request:
+    branches: [ main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: .
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -U -r requirements.txt -c constraints.txt
+          python -m pip install -U -r requirements-dev.txt -c constraints.txt
+          python -m pip install black pylint
+        shell: bash
+
+      - name: Black — check formatting
+        run: |
+          python -m black --check .
+
+      - name: PyLint — code analysis
+        run: |
+          python -m pylint template_implementations
+        env:
+          PYLINTRC: .pylintrc

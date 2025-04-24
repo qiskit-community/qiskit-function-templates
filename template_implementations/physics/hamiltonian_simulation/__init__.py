@@ -12,5 +12,3 @@
 """
 Hamiltonian Simulation Function Template source code.
 """
-
-from .template import run_function

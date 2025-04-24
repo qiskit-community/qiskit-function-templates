@@ -16,14 +16,14 @@
 
 ### About
 
-This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless) that you can use as reference for developing custom [Qiskit Functions](https://docs.quantum.ibm.com/guides/functions), or to explore how to leverage specific function implementations in your own project.
+This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless) that you can use as reference for developing custom [Qiskit Functions](https://docs.quantum.ibm.com/guides/functions), or to explore how to leverage specific function implementations in your own project using [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons).
 
 #### Templates
 Qiskit Function *templates* allow to kickstart the [Qiskit Function](https://docs.quantum.ibm.com/guides/functions) development process with best-practices in interface development, code formatting, unit testing, and more. The repository itself is exposed as a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository), so the CI/CD implementation can be easily extended by implementers to match new projects.
 
 There are currently two templates: a circuit function template and an application function template.
 
-<img src="image.png" alt="image" width="500"/>
+<!-- <img src="tools/image.png" alt="image" width="500"/> -->
 
 #### Template Implementations
 Qiskit Function *template implementations* show different realizations of the application function template above that leverage [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons) to run industry-relevant application workflows. These implementations are structured by application area, currently:
