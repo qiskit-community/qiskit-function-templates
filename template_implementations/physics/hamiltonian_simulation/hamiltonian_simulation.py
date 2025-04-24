@@ -45,9 +45,6 @@ from qiskit_serverless import get_arguments, save_result
 logger = logging.getLogger(__name__)
 
 
-# pylint: disable=too-many-arguments
-# pylint: disable=too-many-locals
-# pylint: disable=too-many-statements
 # TODO: group inputs into categories
 def run_function(
     backend_name,
@@ -64,8 +61,8 @@ def run_function(
     Entry point to the Hamiltonian Simulation Function.
     """
 
-    # Extract parameters from arguments.
-    # Do this at the top of the program so it fails early if any required
+    # Preparation Step: Input validation.
+    # Do this at the top of the function definition so it fails early if any required
     # arguments are missing or invalid.
     dry_run = kwargs.get("dry_run", False)
     testing_backend = kwargs.get("testing_backend", None)
@@ -76,6 +73,7 @@ def run_function(
     aqc_max_iterations = kwargs.get("aqc_max_iterations", 500)
     initial_state = kwargs.get("initial_state", QuantumCircuit(hamiltonian.num_qubits))
 
+    # Preparation Step: Qiskit Runtime & primitive configuration for execution on IBM Quantum Hardware.
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
         logger.info("Starting runtime service")
@@ -119,6 +117,9 @@ def run_function(
     # evaluate the workload's progress. This example returns the estimator options.
     logger.info("estimator_options =", json.dumps(estimator_options, indent=4))
 
+    # Initialize Estimator with options
+    estimator = Estimator(backend, options=estimator_options)
+
     # Perform parameter validation
     if not 0.0 < aqc_stopping_fidelity <= 1.0:
         raise ValueError(
@@ -126,11 +127,12 @@ def run_function(
             "It must be a positive float no greater than 1.",
         )
 
-    # Prepare a dictionary to hold all of the function template outputs.
+    # Preparation Step: Prepare a dictionary to hold all of the function template outputs.
     # Keys will be added to this dictionary throughout the workflow,
     # and it is returned at the end of the program.
     output = {}
 
+    # Beginning of the Qiskit Pattern
     # Step 1: Map
     os.environ["NUMBA_CACHE_DIR"] = "/data"
     logger.info("Hamiltonian:", hamiltonian)
@@ -240,8 +242,6 @@ def run_function(
         return output
 
     # Step 3: Execute on Hardware
-    estimator = Estimator(backend, options=estimator_options)
-
     # Submit the underlying Estimator job. Note that this is not the
     # actual function job.
     job = estimator.run([(isa_circuit, isa_observable)])
@@ -264,10 +264,15 @@ def run_function(
     return output
 
 
+# This is the section where `run_function` is called, it's boilerplate code and can be used
+# without customization.
 if __name__ == "__main__":
+    # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
     try:
         func_result = run_function(**input_args)
+        # Use serverless function to save the results that
+        # will be returned in the job.
         save_result(func_result)
     except Exception:
         save_result(traceback.format_exc())

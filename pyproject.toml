@@ -46,6 +46,9 @@ disable = [
     "not-context-manager",
     "unnecessary-lambda-assignment",  # do not want to implement
     "unspecified-encoding",  # do not want to implement
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-statements"
 ]
 
 enable = [
