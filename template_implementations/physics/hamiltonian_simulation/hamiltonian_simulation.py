@@ -178,7 +178,7 @@ def run_function(
     # Optimize the ansatz parameters by using MPS calculations
     def callback(intermediate_result: OptimizeResult):
         fidelity = 1 - intermediate_result.fun
-        logger.info(f"{datetime.datetime.now()} Intermediate result: Fidelity {fidelity:.8f}")
+        logger.info("%s Intermediate result: Fidelity %.8f", datetime.datetime.now(), fidelity)
         if intermediate_result.fun < stopping_point:
             raise StopIteration
 
@@ -199,7 +199,7 @@ def run_function(
         99,
     ):  # 0 => success; 1 => max iterations reached; 99 => early termination via StopIteration
         raise RuntimeError(f"Optimization failed: {result.message} (status={result.status})")
-    logger.info(f"Done after {result.nit} iterations.")
+    logger.info("Done after %d iterations.", result.nit)
     output["num_iterations"] = result.nit
     aqc_final_parameters = result.x
     output["aqc_final_parameters"] = list(aqc_final_parameters)
