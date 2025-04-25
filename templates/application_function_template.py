@@ -17,13 +17,13 @@ from typing import Any
 import json
 import logging
 import traceback
-import numpy as np
 
+import numpy as np
 from mergedeep import merge
 
 from qiskit import QuantumCircuit
-from qiskit.transpiler import generate_preset_pass_manager
 from qiskit.quantum_info import SparsePauliOp
+from qiskit.transpiler import generate_preset_pass_manager
 
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime import EstimatorV2

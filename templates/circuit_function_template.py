@@ -16,17 +16,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import logging
-import traceback
 import os
+import traceback
+
 import numpy as np
 
-from qiskit_serverless import get_arguments, save_result
-from qiskit.primitives.containers import EstimatorPubLike
+from qiskit.primitives.containers import EstimatorPubLike, PrimitiveResult
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
-from qiskit.primitives.containers.primitive_result import PrimitiveResult
 from qiskit.transpiler import generate_preset_pass_manager
+
 from qiskit_ibm_runtime import QiskitRuntimeService, EstimatorV2
 from qiskit_ibm_runtime.runtime_job_v2 import RuntimeJobV2
+
+from qiskit_serverless import get_arguments, save_result
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,13 @@ class CircuitFunction:
 
     def run(self) -> PrimitiveResult:
         """Execute the request."""
-        # Transpile PUBs
+
+        # The circuit function encapsulates steps 2-4 of the Qiskit Pattern workflow:
+        # https://docs.quantum.ibm.com/guides/intro-to-patterns
+
+        # --
+        # Step 2: Optimize
+        # Transpile PUBs (circuits and observables) to match ISA
         circuits = [pub.circuit for pub in self._pubs]
         all_pubs_params = [pub.parameter_values.as_array() for pub in self._pubs]
         pass_manager = generate_preset_pass_manager(
@@ -109,6 +117,8 @@ class CircuitFunction:
             isa_pub = (isa_circ, isa_observables, params, pub.precision)
             isa_pubs.append(EstimatorPub.coerce(isa_pub))
 
+        # --
+        # Step 3: Execute on Hardware
         # Initialize EstimatorV2
         estimator = EstimatorV2(mode=self._backend, options=self._execution_options)
 
@@ -118,7 +128,8 @@ class CircuitFunction:
         logger.info("Qiskit Runtime job %s submitted.", job.job_id())
 
         # In this case, the result is returned directly without post-processing,
-        # but additional post-processing could be performed at this step.
+        # but additional post-processing could be performed at this step
+        # (Step 4 of the Qiskit Pattern)
         return job.result()
 
 
