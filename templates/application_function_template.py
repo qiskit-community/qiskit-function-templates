@@ -201,11 +201,31 @@ def run_function(
     return output
 
 
+def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
+    """Logger setup to communicate logs through serverless."""
+
+    log_fmt = "%(module)s.%(funcName)s:%(levelname)s:%(asctime)s: %(message)s"
+    formatter = logging.Formatter(log_fmt)
+
+    # Set propagate to `False` since handlers are to be attached.
+    my_logger.propagate = False
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    my_logger.addHandler(stream_handler)
+    my_logger.setLevel(level)
+
+
 # This is the section where `run_function` is called, it's boilerplate code and can be used
 # without customization.
 if __name__ == "__main__":
     # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
+
+    # Allow to configure logging level
+    logging_level = input_args.get("logging_level", logging.INFO)
+    set_up_logger(logger, logging_level)
+
     try:
         func_result = run_function(**input_args)
         # Use serverless function to save the results that

@@ -48,7 +48,8 @@ disable = [
     "unspecified-encoding",  # do not want to implement
     "too-many-arguments",
     "too-many-locals",
-    "too-many-statements"
+    "too-many-statements",
+    "logging-fstring-interpolation",
 ]
 
 enable = [
