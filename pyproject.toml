@@ -7,7 +7,7 @@ authors = [
 
 [tool.setuptools.packages.find]
 where = ["."]  # list of folders that contain the packages (["."] by default)
-include = ["template_implementations"]  # package names should match these glob patterns (["*"] by default)
+include = ["."]  # package names should match these glob patterns (["*"] by default)
 exclude = []  # exclude packages matching these glob patterns (empty by default)
 namespaces = false  # to disable scanning PEP 420 namespaces (true by default)
 

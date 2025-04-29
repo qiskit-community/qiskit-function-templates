@@ -20,7 +20,7 @@ jobs:
     name: ${{ matrix.os }}-arm64-tests-Python-${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     env:
-      DIR: template_implementations/physics/hamiltonian_simulation
+      DIR: physics/hamiltonian_simulation
 
     strategy:
       fail-fast: false
