@@ -16,7 +16,11 @@
 
 ### About
 
-This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless) that you can use as reference for developing custom [Qiskit Functions](https://docs.quantum.ibm.com/guides/functions), or to explore how to leverage specific function implementations in your own project using [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons).
+This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless).
+
+Template implementations are realistic examples of how to build utility-scale application workflows with [Qiskit](https://docs.quantum.ibm.com/guides) and [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons). Spanning across application domains, these are starter kits that you can customize for your own research needs instead of starting from scratch. And they are easily deployable to [Qiskit Serverless](https://docs.quantum.ibm.com/guides/serverless) for managed execution.
+
+The base templates are references you can use for developing custom [Qiskit Functions](https://docs.quantum.ibm.com/guides/functions) using recommended best practices.
 
 #### Base Templates
 Qiskit Function *base templates* allow to kickstart the [Qiskit Function](https://docs.quantum.ibm.com/guides/functions) development process with best-practices in interface development, code formatting, unit testing, and more. The repository itself is exposed as a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository), so the CI/CD implementation can be easily extended by implementers to match new projects.
