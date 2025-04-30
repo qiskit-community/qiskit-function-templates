@@ -1,0 +1,60 @@
+[project]
+name = 'qiskit-function-templates'
+version = "1.0.0"
+authors = [
+    {name = "Your Name", email = "you@yourdomain.com"},
+]
+
+[tool.setuptools.packages.find]
+where = ["."]  # list of folders that contain the packages (["."] by default)
+include = ["."]  # package names should match these glob patterns (["*"] by default)
+exclude = []  # exclude packages matching these glob patterns (empty by default)
+namespaces = false  # to disable scanning PEP 420 namespaces (true by default)
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.pylint.main]
+py-version = "3.11"  # update it when bumping minimum supported python version
+
+[tool.pylint.basic]
+good-names = ["a", "b", "i", "j", "k", "d", "n", "m", "ex", "v", "w", "x", "y", "z", "Run", "_", "logger", "q", "c", "r", "qr", "cr", "qc", "nd", "pi", "op", "b", "ar", "br", "p", "cp", "ax", "dt", "__unittest", "iSwapGate", "mu"]
+method-rgx = "(([a-z_][a-z0-9_]{2,49})|(assert[A-Z][a-zA-Z0-9]{2,43})|(test_[_a-zA-Z0-9]{2,}))$"
+variable-rgx = "[a-z_][a-z0-9_]{1,30}$"
+
+[tool.pylint.format]
+max-line-length = 105  # default 100
+
+[tool.pylint."messages control"]
+disable = [
+# intentionally disabled:
+    "spelling",  # too noisy
+    "fixme", # disabled as TODOs would show up as warnings
+    "protected-access", # disabled as we don't follow the public vs private convention strictly
+    "duplicate-code", # disabled as it is too verbose
+    "too-many-lines", "too-many-branches", "too-many-locals", "too-many-nested-blocks", "too-many-statements",
+    "too-many-instance-attributes", "too-many-arguments", "too-many-public-methods", "too-few-public-methods", "too-many-ancestors",
+    "unnecessary-pass", # allow for methods with just "pass", for clarity
+    "unnecessary-dunder-call", # do not want to implement
+    "no-else-return",  # relax "elif" after a clause with a return
+    "import-outside-toplevel", "import-error", # overzealous with our optionals/dynamic packages
+    "nested-min-max", # this gives false equivalencies if implemented for the current lint version
+    "consider-using-max-builtin", "consider-using-min-builtin",  # unnecessary stylistic opinion
+    "logging-too-many-args",
+    "no-member",  # for dynamically created members
+    "not-context-manager",
+    "unnecessary-lambda-assignment",  # do not want to implement
+    "unspecified-encoding",  # do not want to implement
+    "too-many-arguments",
+    "too-many-locals",
+    "too-many-statements",
+    "logging-fstring-interpolation",
+]
+
+enable = [
+    "use-symbolic-message-instead"
+]
+
+[tool.pylint.spelling]
+spelling-private-dict-file = ".local-spellings"
