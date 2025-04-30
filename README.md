@@ -35,7 +35,7 @@ Qiskit Function *template implementations* show different realizations of the ap
 - `physics`
 - `chemistry`
 
-Each implementation is contained in a directory in the corresponding application area, for example, for the hamiltonian simulation function: [`physics/hamiltonian_simulation/hamiltonian_simulation.py`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/hamiltonian_simulation/hamiltonian_simulation.py). The directory might contain additional files that can be uploaded to the serverless environment for the function execution.
+Each implementation is contained in a directory in the corresponding application area, for example, for the hamiltonian simulation function: [`physics/hamiltonian_simulation`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/hamiltonian_simulation). The directory might contain additional files that can be uploaded to the serverless environment for the function execution.
 
 For convenience, we provide direct download links for each application template directory:
 
