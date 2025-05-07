@@ -1,5 +1,5 @@
 ---
-name: Hamiltonian Simulation Tests
+name: SQD PCM Tests
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
     name: ${{ matrix.os }}-arm64-tests-Python-${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     env:
-      DIR: physics/hamiltonian_simulation
+      DIR: chemistry/sqd_pcm
 
     strategy:
       fail-fast: false

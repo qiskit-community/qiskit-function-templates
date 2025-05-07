@@ -1,0 +1,8 @@
+# qiskit ecosystem (implicit qiskit dependency)
+qiskit_addon_sqd==0.10.0
+qiskit-serverless
+qiskit-ibm-runtime
+
+# external packages
+ffsim==0.0.54
+pyscf==2.9.0
