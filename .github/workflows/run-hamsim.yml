@@ -39,7 +39,6 @@ jobs:
       - name: Install root dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -U -r requirements.txt -c constraints.txt
           python -m pip install -U -r requirements-dev.txt -c constraints.txt
         shell: bash
 
@@ -48,10 +47,10 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             # Windows runner but using bash
-            python -m pip install -U -r $DIR/requirements-dev.txt -c constraints.txt
+            python -m pip install -U -r $DIR/requirements.txt -c constraints.txt
           else
             # macOS or Ubuntu
-            python -m pip install -U -r $DIR/requirements-dev.txt -c constraints.txt
+            python -m pip install -U -r $DIR/requirements.txt -c constraints.txt
           fi
 
 
