@@ -34,7 +34,7 @@ class TestSQDPCM(unittest.TestCase):
 
         # mimick ray setup in serverless cluster
         cwd = Path.cwd()
-        ray.init(runtime_env={"working_dir": cwd / "source_files"})
+        ray.init(runtime_env={"working_dir": cwd / "chemistry/sqd_pcm/source_files"})
 
         self.count_dict_name = cwd / "test/data/water_mini_count_dict.txt"
         self.backend_name = None
