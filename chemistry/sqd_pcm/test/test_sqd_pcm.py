@@ -21,12 +21,12 @@ import ray
 from qiskit_ibm_runtime.fake_provider import FakeHanoiV2
 
 from source_files.sqd_pcm import run_function
-from .data import methylamine
+from .data import test_molecule
 
 
 class TestMethylamine(unittest.TestCase):
     """
-    Test SQD PCM with methylamine molecule
+    Test SQD PCM with LiH molecule (dummy)
     """
 
     def setUp(self):
@@ -36,17 +36,12 @@ class TestMethylamine(unittest.TestCase):
         cwd = Path.cwd()
         ray.init(runtime_env={"working_dir": cwd / "source_files"})
 
-        self.count_dict_name = cwd / "test/data/methylamine_count_dict.txt"
+        self.count_dict_name = cwd / "test/data/water_mini_count_dict.txt"
         self.backend_name = None
-        self.datafiles_name = methylamine.FILE_NAME
-        self.molecule = methylamine.MOLECULE
-        self.solvent_options = methylamine.SOLVENT
-        self.sqd_options = {
-            "sqd_iterations": 1,
-            "number_of_batches": 2,
-            "samples_per_batch": 2,
-            "max_davidson_cycles": 2,
-        }
+        self.datafiles_name = test_molecule.FILE_NAME
+        self.molecule = test_molecule.MOLECULE
+        self.solvent_options = test_molecule.SOLVENT
+        self.sqd_options = test_molecule.SQD
 
     def test_run(self):
         """Test run_function"""
@@ -61,7 +56,6 @@ class TestMethylamine(unittest.TestCase):
             files_name=self.datafiles_name,
             count_dict_file_name=self.count_dict_name,
         )
-
         # Review testing tolerance (high because of result variability)
-        self.assertTrue(out["sci_solver_total_duration"] < 30)
-        self.assertTrue(out["lowest_energy_value"] < -90)
+        self.assertTrue(out["sci_solver_total_duration"] < 6)
+        self.assertTrue(out["lowest_energy_value"] < -72)
