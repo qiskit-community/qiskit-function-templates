@@ -1,4 +1,0 @@
- services:
-     ray-head:
-         container_name: ray-head-elena
-         image: test-local-provider-function:latest
