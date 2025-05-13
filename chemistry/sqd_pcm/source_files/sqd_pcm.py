@@ -13,16 +13,17 @@
 """
 SQD-PCM Function Template source code.
 """
-
+from pathlib import Path
 from typing import Any
-
+from datetime import datetime
 import os
+import sys
 import json
 import logging
 import time
 import traceback
 import numpy as np
-from pathlib import Path
+
 import ffsim
 
 from pyscf import gto, scf, mcscf, ao2mo, tools, cc
@@ -42,19 +43,20 @@ from qiskit_addon_sqd.subsampling import postselect_and_subsample
 from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
 from qiskit_serverless import get_arguments, save_result, distribute_task, get
 
-from .solve_solvent import solve_solvent
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+from solve_solvent import solve_solvent  # pylint: disable=wrong-import-position
 
 logger = logging.getLogger(__name__)
 
 
 def run_function(
     backend_name: str,
-    files_name: str,
     molecule: dict,
     solvent_options: dict,
-    lucj_options: dict,
     sqd_options: dict,
-    **kwargs,  # pylint: disable=unused-argument
+    lucj_options: dict | None = None,
+    **kwargs,
 ) -> dict[str, Any]:
     """
     Main entry point for the SQD-PCM (Polarizable Continuum Model) workflow.
@@ -64,11 +66,6 @@ def run_function(
     Args:
         backend_name: Identifier for the target backend, required for all
             workflows that access IBM Quantum hardware.
-
-        files_name: Must be specified. Name without the file extension.
-            This name will be assigned for checkpoint, fcidump, and count_dictionary files
-            as well as the name of the SQD results folder containing the
-            "bitstring_matrix" and "sci_vector" for each batch.
 
         molecule: dictionary with molecule information:
             - "atom" (str): required field, follows pyscf specification for atomic geometry.
@@ -98,23 +95,26 @@ def run_function(
                 "C-PCM", "SS(V)PE", see https://manual.q-chem.com/5.4/topic_pcm-em.html
             - "eps" (float): required field. Dielectric constant of the solvent in the PCM.
 
-        lucj_options: dictionary with lucj options information:
-            - "optimization_level" (int): optional field, default is 2
-            - "initial_layout" (list[int]): optional field, default is None
-            - "dynamical_decoupling" (bool): optional field, default is True
-            - "twirling" (bool): optional field, default is True
-            - "number_of_shots" (int): optional field, default is 10000
-
         sqd_options: dictionary with sqd options information:
             - "sqd_iterations" (int): required field.
             - "number_of_batches" (int): required field.
             - "samples_per_batch" (int): required field.
             - "max_davidson_cycles" (int): required field.
 
+        lucj_options: optional dictionary with lucj options information:
+            - "optimization_level" (int): optional field, default is 2
+            - "initial_layout" (list[int]): optional field, default is None
+            - "dynamical_decoupling" (bool): optional field, default is True
+            - "twirling" (bool): optional field, default is True
+            - "number_of_shots" (int): optional field, default is 10000
+
         **kwargs
-            Optional keyword arguments to customize behavior (e.g., alternate paths
-            for local testing). Use documented keywords where possible to maintain clarity.
-            The argument types must be serializable by qiskit-serverless.
+            Optional keyword arguments to customize behavior. Existing kwargs include:
+            - "files_name" (str): optional name for output files (enabled for local testing)
+            - "testing_backend" (FakeBackendV2): optional fake backend instance to bypass
+                qiskit runtime service instantiation (enabled for local testing)
+            - "count_dict_file_name" (str): path to a count dict file to bypass primitive
+                execution and jump directly to SQD section (enabled for local testing)
 
     Returns:
         The function should return the execution results as a dictionary with string keys.
@@ -124,9 +124,6 @@ def run_function(
     # Preparation Step: Input validation.
     # Do this at the top of the function definition so it fails early if any required
     # arguments are missing or invalid.
-
-    Path("./output_sqd_pcm").mkdir(exist_ok=True)
-    datafiles_name = "./output_sqd_pcm/" + files_name
 
     # Molecule parsing
     # Required:
@@ -146,6 +143,8 @@ def run_function(
     mymethod = solvent_options["method"]
 
     # LUCJ options parsing
+    if lucj_options is None:
+        lucj_options = {}
     opt_level = lucj_options.get("optimization_level", 2)
     initial_layout = lucj_options.get("initial_layout", None)
     use_dd = lucj_options.get("dynamical_decoupling", True)
@@ -160,6 +159,12 @@ def run_function(
 
     # kwarg parsing (local testing)
     testing_backend = kwargs.get("testing_backend", None)
+    count_dict_file_name = kwargs.get("count_dict_file_name", None)
+
+    files_name = kwargs.get("files_name", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    output_path = Path.cwd() / "output_sqd_pcm"
+    output_path.mkdir(exist_ok=True)
+    datafiles_name = str(output_path) + "/" + files_name
 
     # --
     # Preparation Step: Qiskit Runtime & primitive configuration for
@@ -167,10 +172,10 @@ def run_function(
 
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
-        print("Starting runtime service")
+        logger.info("Starting runtime service")
         service = QiskitRuntimeService(channel="ibm_quantum")
         backend = service.backend(backend_name)
-        print("backend", backend)
+        logger.info(f"Backend: {backend.name}")
 
         # Set up sampler and corresponding options
         sampler = SamplerV2(backend)
@@ -180,7 +185,7 @@ def run_function(
         sampler.options.default_shots = num_shots
     else:
         backend = testing_backend
-        print(f"testing backend: {backend.name}")
+        logger.info(f"Testing backend: {backend.name}")
 
         # Set up backend sampler.
         # This doesn't allow running with twirling and dd
@@ -195,7 +200,7 @@ def run_function(
     # In this step, input arguments are used to construct relevant quantum circuits and operators
 
     # Initialize the molecule object (pyscf)
-    print("Initializing molecule object")
+    logger.info("Initializing molecule object")
     mol = gto.Mole()
     mol.build(
         atom=geo,
@@ -266,14 +271,14 @@ def run_function(
         orbsym=[1] * ncas,
     )
 
-    print("Performing CCSD")
+    logger.info("Performing CCSD")
     # Read FCIDUMP and perform CCSD on only active space
     mf_as = tools.fcidump.to_scf(fcidump_file_name)
     mf_as.kernel()
 
     mc_cc = cc.CCSD(mf_as)
     mc_cc.kernel()
-    mc_cc.t1
+    mc_cc.t1  # pylint: disable=pointless-statement
     t2 = mc_cc.t2
 
     n_reps = 2
@@ -287,8 +292,8 @@ def run_function(
     alpha_alpha_indices = [(p, p + 1) for p in range(norb - 1)]
     alpha_beta_indices = [(p, p) for p in range(0, norb, 4)]
 
-    print("Same spin orbital connections:", alpha_alpha_indices)
-    print("Opposite spin orbital connections:", alpha_beta_indices)
+    logger.info(f"Same spin orbital connections: {alpha_alpha_indices}")
+    logger.info(f"Opposite spin orbital connections: {alpha_beta_indices}")
 
     # Construct LUCJ op
     ucj_op = ffsim.UCJOpSpinBalanced.from_t_amplitudes(
@@ -314,30 +319,35 @@ def run_function(
     pass_manager.pre_init = ffsim.qiskit.PRE_INIT
     transpiled = pass_manager.run(circuit)
 
-    print("Optimization level ", opt_level, transpiled.count_ops(), transpiled.depth())
+    logger.info(
+        f"Optimization level: {opt_level}, ops: {transpiled.count_ops()}, depth: {transpiled.depth()}"
+    )
 
-    two_q_depth = transpiled.depth(lambda x: x[0].name == "ecr")
-    print("Two-qubit gate depth:", two_q_depth)
+    two_q_depth = transpiled.depth(lambda x: x.operation.num_qubits == 2)
+    logger.info(f"Two-qubit gate depth: {two_q_depth}")
 
     # --
     # Step 3: Execute on Hardware
     # Submit the underlying Sampler job. Note that this is not the
     # actual function job.
+    if count_dict_file_name is None:
+        # Submit the LUCJ job
+        logger.info("Submitting sampler job")
+        job = sampler.run([transpiled])
+        logger.info(f"Job ID: {job.job_id()}")
+        logger.info(f"Job Status: {job.status()}")
 
-    # Submit the LUCJ job
-    job = sampler.run([transpiled])
-    print(f">>> Job ID: {job.job_id()}")
-    print(f">>> Job Status: {job.status()}")
+        # Wait until job is complete
+        result = job.result()
+        pub_result = result[0]
+        counts_dict = pub_result.data.meas.get_counts()
 
-    # Wait until job is complete
-    result = job.result()
-    pub_result = result[0]
-    counts = pub_result.data.meas.get_counts()
-
-    # Save the count dictionary into a file
-    count_dict_file_name = str(datafiles_name + ".count_dict.txt")
-    with open(count_dict_file_name, "w") as output:
-        print(counts, file=output)
+    else:
+        # read LUCJ samples from count_dict
+        logger.info("Skipping sampler, loading counts dict from file")
+        with open(count_dict_file_name, "r") as file:
+            count_dict_string = file.read().replace("\n", "")
+        counts_dict = json.loads(count_dict_string.replace("'", '"'))
 
     # --
     # Step 4: Post-process
@@ -353,18 +363,8 @@ def run_function(
         num_elec_a, num_elec_b = nelecas
     spin_sq = input_spin
 
-    # read LUCJ samples from count_dict
-    count_dict_file_name = str(datafiles_name + ".count_dict.txt")
-    with open(count_dict_file_name, "r") as file:
-        count_dict_string = file.read().replace("\n", "")
-
-    counts_dict = json.loads(count_dict_string.replace("'", '"'))
-
     # Convert counts into bitstring and probability arrays
     bitstring_matrix_full, probs_arr_full = counts_to_arrays(counts_dict)
-
-    # Assing checkpoint file name based on "datafiles_name" user input
-    checkpoint_file_name = str(datafiles_name + ".chk")
 
     # We set qiskit_serverless to explicitly reserve 1 cpu per thread, as
     # the task is CPU-bound and might degrade in performance when sharing
@@ -391,18 +391,6 @@ def run_function(
             checkpoint_file=checkpoint_file,
         )
 
-    # Code below checks if the folder with name matching "datafiles_name" already exists.
-    # If folder does not exist yet, the code block below creates it.
-    def create_directory_if_not_exists(path):
-        if not os.path.exists(path):
-            os.makedirs(path)
-            print(f"Created directory: {path}")
-        else:
-            print(f"Directory already exists: {path}")
-
-    folder_name = str(molecule["datafiles_name"] + "_results")
-    create_directory_if_not_exists(folder_name)
-
     e_hist = np.zeros((iterations, n_batches))  # energy history
     s_hist = np.zeros((iterations, n_batches))  # spin history
     g_solv_hist = np.zeros((iterations, n_batches))  # g_solv history
@@ -410,7 +398,7 @@ def run_function(
     avg_occupancy = None
 
     for i in range(iterations):
-        print(f"Starting configuration recovery iteration {i}")
+        logger.info(f"Starting configuration recovery iteration {i}")
         # On the first iteration, we have no orbital occupancy information from the
         # solver, so we begin with the full set of noisy configurations.
         if avg_occupancy is None:
@@ -445,7 +433,7 @@ def run_function(
         res1 = []
         for j in range(n_batches):
             strs_a, strs_b = bitstring_matrix_to_ci_strs(batches[j])
-            print(f"Batch {j} subspace dimension: {len(strs_a) * len(strs_b)}")
+            logger.info(f"Batch {j} subspace dimension: {len(strs_a) * len(strs_b)}")
 
             res1.append(
                 solve_solvent_parallel(
@@ -470,17 +458,6 @@ def run_function(
             occs_tmp.append(avg_occs)
             coeffs.append(coeffs_sci)
 
-            # These lines of code save sci_vector and bitsring_matrix for all batches at
-            # all of the iterations
-            # np.savetxt(
-            #     folder_name + "/address_list-for-iter-" + str(i) + "-batch-" + str(j) + ".txt",
-            #     batches[j],
-            # )
-            # np.savetxt(
-            #     folder_name + "/c-for-iter-" + str(i) + "-batch-" + str(j) + ".txt",
-            #     coeffs_sci.amplitudes,
-            # )
-
         # Combine batch results
         avg_occupancy = tuple(np.mean(occs_tmp, axis=0))
 
@@ -492,36 +469,14 @@ def run_function(
 
         lowest_e_batch_index = np.argmin(e_hist[i, :])
 
-        # These lines of code save sci_vector and bitsring_matrix only for
-        # lowest energy batch on each iteration
-        coeffs_sci_batch = coeffs[lowest_e_batch_index]
-        np.savetxt(
-            folder_name
-            + "/bitstring_matrix_for_lowest_energy_batch_"
-            + str(lowest_e_batch_index)
-            + "_at_SQD_iteration_"
-            + str(i)
-            + ".txt",
-            batches[lowest_e_batch_index],
-        )
-        np.savetxt(
-            folder_name
-            + "/sci_vector_for_lowest_energy_batch_"
-            + str(lowest_e_batch_index)
-            + "_at_SQD_iteration_"
-            + str(i)
-            + ".txt",
-            coeffs_sci_batch.amplitudes,
-        )
-
-        print("Lowest energy batch: " + str(lowest_e_batch_index))
-        print("Lowest energy value: " + str(np.min(e_hist[i, :])))
-        print("Corresponding g_solv value: " + str(g_solv_hist[i, lowest_e_batch_index]))
-        print("-----------------------------------")
+        logger.info(f"Lowest energy batch: {lowest_e_batch_index}")
+        logger.info(f"Lowest energy value: {np.min(e_hist[i, :])}")
+        logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
+        logger.info("-----------------------------------")
 
         end = time.time()
         duration = end - start
-        print("SCI_solver totally takes:", duration, "seconds")
+        logger.info(f"SCI_solver totally takes: {duration} seconds")
 
         output = {
             "total_energy_hist": e_hist,
@@ -529,8 +484,8 @@ def run_function(
             "solvation_free_energy_hist": g_solv_hist,
             "occupancy_hist": occupancy_hist,
             "lowest_energy_batch": lowest_e_batch_index,
-            "lowest_energy_value": str(np.min(e_hist[i, :])),
-            "solvation_free_energy": str(g_solv_hist[i, lowest_e_batch_index]),
+            "lowest_energy_value": np.min(e_hist[i, :]),
+            "solvation_free_energy": g_solv_hist[i, lowest_e_batch_index],
             "sci_solver_total_duration": duration,
         }
 
@@ -555,6 +510,7 @@ def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
 # This is the section where `run_function` is called, it's boilerplate code and can be used
 # without customization.
 if __name__ == "__main__":
+
     # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
 
@@ -570,3 +526,5 @@ if __name__ == "__main__":
     except Exception:
         save_result(traceback.format_exc())
         raise
+
+    sys.exit(0)

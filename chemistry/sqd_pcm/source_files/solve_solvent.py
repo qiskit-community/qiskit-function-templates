@@ -17,13 +17,9 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
-from jax import Array, config, grad, jit, vmap
-from jax import numpy as jnp
-from jax.scipy.linalg import expm
-from scipy import linalg as LA
 
 # DSK Add imports needed for CASCI wrapper
-from pyscf import ao2mo, gto, scf, fci
+from pyscf import ao2mo, scf, fci
 from pyscf.mcscf import avas, casci
 from pyscf.solvent import pcm
 from pyscf.lib import chkfile, logger
@@ -36,16 +32,19 @@ from qiskit_addon_sqd.fermion import (
 
 # DSK Below is the modified CASCI kernel compatible with SQD.
 # It utilizes the "fci.selected_ci.kernel_fixed_space"
-# as well as enables passing the "batch" and "max_davidson" input arguments from "solve_solvent".
-# The "batch" contains the CI addresses corresponding to subspaces derived from LUCJ and S-CORE calculations.
+# as well as enables passing the "batch" and "max_davidson"
+# input arguments from "solve_solvent".
+# The "batch" contains the CI addresses corresponding to subspaces
+# derived from LUCJ and S-CORE calculations.
 # The "max_davidson" controls the maximum number of cycles of Davidson's algorithm.
 
 
-def kernel(casci, mo_coeff=None, ci0=None, verbose=logger.NOTE, envs=None):
+# pylint: disable = unused-argument
+def kernel(casci_object, mo_coeff=None, ci0=None, verbose=logger.NOTE, envs=None):
     """CASCI solver compatible with SQD.
 
     Args:
-        casci: CASCI or CASSCF object.
+        casci_object: CASCI or CASSCF object.
         In case of SQD, only CASCI instance is currently incorporated.
 
         mo_coeff : ndarray
@@ -72,56 +71,56 @@ def kernel(casci, mo_coeff=None, ci0=None, verbose=logger.NOTE, envs=None):
             and "envs" pop in kernel function.
     """
     if mo_coeff is None:
-        mo_coeff = casci.mo_coeff
+        mo_coeff = casci_object.mo_coeff
     if ci0 is None:
-        ci0 = casci.ci
+        ci0 = casci_object.ci
 
-    log = logger.new_logger(casci, verbose)
+    log = logger.new_logger(casci_object, verbose)
     t0 = (logger.process_clock(), logger.perf_counter())
     log.debug("Start CASCI")
 
-    ncas = casci.ncas
-    nelecas = casci.nelecas
+    ncas = casci_object.ncas
+    nelecas = casci_object.nelecas
 
     # The start of SQD version of kernel
     # DSK add the read of configurations for batch
-    ci_strs_sqd = casci.batch
+    ci_strs_sqd = casci_object.batch
 
     # DSK add the input for the maximum number of cycles of Davidson's algorithm
-    max_davidson = casci.max_davidson
+    max_davidson = casci_object.max_davidson
 
     # DSK add electron up and down count and norb = ncas
-    N_up = nelecas[0]
-    N_dn = nelecas[1]
+    n_up = nelecas[0]
+    n_dn = nelecas[1]
     norb = ncas
 
     # DSK Eignestate solver info
     sqd_verbose = verbose
 
     # DSK ERI read
-    eri_cas = ao2mo.restore(1, casci.get_h2eff(), casci.ncas)
+    eri_cas = ao2mo.restore(1, casci_object.get_h2eff(), casci_object.ncas)
     t1 = log.timer("integral transformation to CAS space", *t0)
 
     # DSK 1e integrals
-    h1eff, energy_core = casci.get_h1eff()
+    h1eff, energy_core = casci_object.get_h1eff()
     log.debug("core energy = %.15g", energy_core)
     t1 = log.timer("effective h1e in CAS space", *t1)
 
     if h1eff.shape[0] != ncas:
         raise RuntimeError(
-            "Active space size error. nmo=%d ncore=%d ncas=%d"
-            % (mo_coeff.shape[1], casci.ncore, ncas)
+            "Active space size error. nmo=%d ncore=%d ncas=%d"  # pylint: disable=consider-using-f-string
+            % (mo_coeff.shape[1], casci_object.ncore, ncas)
         )
 
     # DSK fcisolver needs to be defined in accordance with SQD
     # in this software stack it is done in the "solve_solvent" portion of the code.
-    myci = casci.fcisolver
+    myci = casci_object.fcisolver
     e_cas, sqdvec = fci.selected_ci.kernel_fixed_space(
         myci,
         h1eff,
         eri_cas,
         norb,
-        (N_up, N_dn),
+        (n_up, n_dn),
         ci_strs=ci_strs_sqd,
         verbose=sqd_verbose,
         max_cycle=max_davidson,
@@ -173,19 +172,23 @@ def solve_solvent(
             arrays containing unsigned integer representations of the determinants. The two lists
             should represent the spin-up and spin-down orbitals, respectively.
 
-        To build PCM model PySCF needs the structure of the molecule. Hence, the electron integrals (hcore and eri)
-        are not enough to form IEF-PCM simulation. Intead the "start.chk" file is used.
+        To build PCM model PySCF needs the structure of the molecule. Hence, the electron integrals
+        (hcore and eri) are not enough to form IEF-PCM simulation. Intead the "start.chk" file is used.
         This workflow also requires additional information about solute and solvent,
         which is reflected by additional arguments below
 
         myeps: Dielectric parameter of the solvent.
-        mysolvmethod: Solvent model, which can be IEF-PCM, COSMO, C-PCM, SS(V)PE, see https://manual.q-chem.com/5.4/topic_pcm-em.html
+        mysolvmethod: Solvent model, which can be IEF-PCM, COSMO, C-PCM, SS(V)PE,
+               see https://manual.q-chem.com/5.4/topic_pcm-em.html
                At the moment only IEF-PCM was tested.
-               In principle two other models from PySCF "solvent" module can be used as well, namely SMD and polarizable embedding (PE).
-               The SMD and PE were not tested yet and their usage requires addition of more input arguments for "solve_solvent".
+               In principle two other models from PySCF "solvent" module can be used as well,
+               namely SMD and polarizable embedding (PE).
+               The SMD and PE were not tested yet and their usage requires addition of more
+               input arguments for "solve_solvent".
         myavas: This argument allows user to select active space in solute with AVAS.
                 The corresponding list should include target atomic orbitals.
-                If myavas=None, then active space selected based on number of orbitals derivde from ci_strs.
+                If myavas=None, then active space selected based on number of orbitals
+                derived from ci_strs.
                 It is assumed that if myavas=None, then the target calculation is either
                 a) corresponds to full basis case.
                 b) close to full basis case and only few core orbitals are excluded.
@@ -209,14 +212,18 @@ def solve_solvent(
 
     """
     # Unlike the "solve_fermion", the "solve_solvent" utilizes the "checkpoint" file to
-    # get the starting HF information, which means that "solve_solvent" does not accept "hcore" and "eri" as the input arguments.
-    # Instead "hcore" and "eri" are generated inside of the custom SQD-compatible CASCI kernel (defined above).
-    # The generation of "hcore" and "eri" is based on the information from "checkpoint" file as well as "myavas" and "num_orbitals" input arguments.
+    # get the starting HF information, which means that "solve_solvent" does not accept
+    # "hcore" and "eri" as the input arguments.
+    # Instead "hcore" and "eri" are generated inside of the custom SQD-compatible
+    # CASCI kernel (defined above).
+    # The generation of "hcore" and "eri" is based on the information from "checkpoint" file
+    # as well as "myavas" and "num_orbitals" input arguments.
 
     # DSK this part handles addresses and is identical to "solve_fermion"
     if isinstance(bitstring_matrix, tuple):
         warnings.warn(
-            "Passing the input determinants as integers is deprecated. Users should instead pass a bitstring matrix defining the subspace.",
+            "Passing the input determinants as integers is deprecated. "
+            "Users should instead pass a bitstring matrix defining the subspace.",
             DeprecationWarning,
             stacklevel=2,
         )
@@ -239,11 +246,15 @@ def solve_solvent(
 
     ############################################
     # This section is specific to "solve_solvent" and is not present in "solve_fermion".
-    # In case of "solve_fermion" the "eri" and "hcore" are passed directly to "fci.selected_ci.kernel_fixed_space".
-    # In case of "solve_solvent" the incorporation of the polarizable continuum model requires utilization of "CASCI.with_solvent"
-    # data object from PySCF, where underlying CASCI.base_kernel has to be replaced with SQD-compatible version.
+    # In case of "solve_fermion" the "eri" and "hcore" are passed directly to
+    # "fci.selected_ci.kernel_fixed_space".
+    # In case of "solve_solvent" the incorporation of the polarizable continuum model
+    # requires utilization of "CASCI.with_solvent"
+    # data object from PySCF, where underlying CASCI.base_kernel has to be replaced
+    # with SQD-compatible version.
     # Due to these differences in the implementation the "solve_solvent" recovers
-    # the converged mean field results and "molecule" object from "checkpoint" file (instead of using FCIDUMP),
+    # the converged mean field results and "molecule" object from "checkpoint" file
+    # (instead of using FCIDUMP),
     # followed by passing of solute, solvent, and active space information to "CASCI.with_solvent".
     # This includes the initiation of "mol", "cm", "mf", and "mc" data structures.
 
@@ -252,7 +263,8 @@ def solve_solvent(
     # DSK Initiation of the solvent model
     cm = pcm.PCM(mol)
     cm.eps = myeps  # solute eps value
-    cm.method = mysolvmethod  # IEF-PCM, COSMO, C-PCM, SS(V)PE, see https://manual.q-chem.com/5.4/topic_pcm-em.html
+    cm.method = mysolvmethod  # IEF-PCM, COSMO, C-PCM, SS(V)PE,
+    # see https://manual.q-chem.com/5.4/topic_pcm-em.html
 
     # DSK Read-in converged RHF solution
     scf_result_dic = chkfile.load(checkpoint_file, "scf")
@@ -261,15 +273,15 @@ def solve_solvent(
 
     # Identify the active space based on the user input of AVAS or number of orbitals and electrons
     if myavas is not None:
-        ORBS = myavas
-        AVAS = avas.AVAS(mf, ORBS, with_iao=True)
-        AVAS.kernel()
-        ncas, nelecas, mo, occ_weights, vir_weights = (
-            AVAS.ncas,
-            AVAS.nelecas,
-            AVAS.mo_coeff,
-            AVAS.occ_weights,
-            AVAS.vir_weights,
+        orbs = myavas
+        avas_obj = avas.AVAS(mf, orbs, with_iao=True)
+        avas_obj.kernel()
+        ncas, nelecas, _, _, _ = (
+            avas_obj.ncas,
+            avas_obj.nelecas,
+            avas_obj.mo_coeff,
+            avas_obj.occ_weights,
+            avas_obj.vir_weights,
         )
     else:
         ncas = num_orbitals
@@ -279,7 +291,7 @@ def solve_solvent(
     mc = casci.CASCI(mf, ncas=ncas, nelecas=nelecas).PCM(cm)
     # Replace mo_coeff with ones produced by AVAS if AVAS is utilized
     if myavas is not None:
-        mc.mo_coeff = AVAS.mo_coeff
+        mc.mo_coeff = avas_obj.mo_coeff
     # Read-in the configuration interaction subspace derived from LUCJ and S-CORE
     mc.batch = ci_strs
     # Assign number of maxium Davidson steps
@@ -299,8 +311,9 @@ def solve_solvent(
     # Get data out of the "CASCI.with_solvent" object
     e_sci = mc_result[0]
     sci_vec = mc_result[2]
-    # Here we get additional output comparing to "solve_fermion", which is the solvation free energy (G_solv)
-    G_solv = mc.with_solvent.e
+    # Here we get additional output comparing to "solve_fermion",
+    # which is the solvation free energy (G_solv)
+    g_solv = mc.with_solvent.e
 
     #####################################################
     # The remainder of the code in solve_solvent is nearly identical to solve_fermion code.
@@ -334,4 +347,4 @@ def solve_solvent(
         ci_strs_b=sci_vec._strs[1],
     )
 
-    return e_sci, sci_state, avg_occupancy, spin_squared, G_solv
+    return e_sci, sci_state, avg_occupancy, spin_squared, g_solv

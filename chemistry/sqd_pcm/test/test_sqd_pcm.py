@@ -11,65 +11,41 @@
 # that they have been altered from the originals.
 
 """
-Hamiltonian Simulation Function Template unit tests.
+SQD PCM Function Template unit tests.
 """
-
 import unittest
+from pathlib import Path
+
+import ray
 
 from qiskit_ibm_runtime.fake_provider import FakeHanoiV2
 
-from ..source_files.sqd_pcm import run_function
+from source_files.sqd_pcm import run_function
+from .data import methylamine
 
 
-class TestSqdPcm(unittest.TestCase):
+class TestMethylamine(unittest.TestCase):
     """
-    Test SQD PCM
+    Test SQD PCM with methylamine molecule
     """
 
     def setUp(self):
         super().setUp()
-        self.backend_name = "test_eagle_eu-de"
-        self.datafiles_name = "methanol"
 
-        # pylint: disable=consider-using-f-string
-        self.molecule = {
-            "atom": """
-            O -0.04559 -0.75076 -0.00000;
-            C -0.04844 0.65398 -0.00000;
-            H 0.85330 -1.05128 -0.00000;
-            H -1.08779 0.98076 -0.00000;
-            H 0.44171 1.06337 0.88811;
-            H 0.44171 1.06337 -0.88811
-            """,
-            "basis": "cc-pvdz",
-            "spin": 0,
-            "charge": 0,
-            "verbosity": 0,
-            "number_of_active_orb": 12,
-            "number_of_active_alpha_elec": 7,
-            "number_of_active_beta_elec": 7,
-            "avas_selection": ["%d O %s" % (k, x) for k in [0] for x in ["2s", "2px", "2py", "2pz"]]
-            + ["%d C %s" % (k, x) for k in [1] for x in ["2s", "2px", "2py", "2pz"]]
-            + ["%d H 1s" % k for k in [2, 3, 4, 5]],
-        }
+        # mimick ray setup in serverless cluster
+        cwd = Path.cwd()
+        ray.init(runtime_env={"working_dir": cwd / "source_files"})
 
-        self.solvent_options = {
-            "method": "IEF-PCM",
-            "eps": 78.3553,  # value for water
-        }
-
-        self.lucj_options = {
-            "dynamical_decoupling": True,
-            "twirling": True,
-            "number_of_shots": 200000,
-            "optimization_level": 2,
-        }
-
+        self.count_dict_name = cwd / "test/data/methylamine_count_dict.txt"
+        self.backend_name = None
+        self.datafiles_name = methylamine.FILE_NAME
+        self.molecule = methylamine.MOLECULE
+        self.solvent_options = methylamine.SOLVENT
         self.sqd_options = {
-            "sqd_iterations": 3,
-            "number_of_batches": 10,
-            "samples_per_batch": 1000,
-            "max_davidson_cycles": 200,
+            "sqd_iterations": 1,
+            "number_of_batches": 2,
+            "samples_per_batch": 2,
+            "max_davidson_cycles": 2,
         }
 
     def test_run(self):
@@ -77,12 +53,15 @@ class TestSqdPcm(unittest.TestCase):
 
         out = run_function(
             backend_name=self.backend_name,
-            files_name=self.datafiles_name,
             molecule=self.molecule,
             solvent_options=self.solvent_options,
-            lucj_options=self.lucj_options,
+            lucj_options={},
             sqd_options=self.sqd_options,
             testing_backend=FakeHanoiV2(),
+            files_name=self.datafiles_name,
+            count_dict_file_name=self.count_dict_name,
         )
 
-        print("OUTPUT:", out)
+        # Review testing tolerance (high because of result variability)
+        self.assertTrue(out["sci_solver_total_duration"] < 30)
+        self.assertTrue(out["lowest_energy_value"] < -90)
