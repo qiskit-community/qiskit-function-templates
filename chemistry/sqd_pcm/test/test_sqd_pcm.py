@@ -36,7 +36,7 @@ class TestSQDPCM(unittest.TestCase):
         cwd = Path.cwd()
         ray.init(runtime_env={"working_dir": cwd / "chemistry/sqd_pcm/source_files"})
 
-        self.count_dict_name = cwd / "test/data/water_mini_count_dict.txt"
+        self.count_dict_name = cwd / "chemistry/sqd_pcm/test/data/water_mini_count_dict.txt"
         self.backend_name = None
         self.datafiles_name = test_molecule.FILE_NAME
         self.molecule = test_molecule.MOLECULE
