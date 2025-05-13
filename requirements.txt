@@ -1,2 +1,0 @@
-qiskit-serverless
-qiskit-ibm-runtime
