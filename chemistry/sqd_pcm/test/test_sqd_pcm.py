@@ -20,13 +20,13 @@ import ray
 
 from qiskit_ibm_runtime.fake_provider import FakeHanoiV2
 
-from source_files.sqd_pcm import run_function
+from ..source_files.sqd_pcm import run_function
 from .data import test_molecule
 
 
-class TestMethylamine(unittest.TestCase):
+class TestSQDPCM(unittest.TestCase):
     """
-    Test SQD PCM with LiH molecule (dummy)
+    Test SQD PCM with a sample molecule
     """
 
     def setUp(self):
