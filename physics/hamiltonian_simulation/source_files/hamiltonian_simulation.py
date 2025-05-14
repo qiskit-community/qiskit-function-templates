@@ -9,6 +9,7 @@
 # Any modifications or derivative works of this code must retain this
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
+
 """
 Hamiltonian Simulation Function Template source code.
 """
@@ -21,6 +22,7 @@ import traceback
 import numpy as np
 
 from mergedeep import merge
+
 from scipy.optimize import OptimizeResult, minimize
 
 from qiskit import QuantumCircuit
@@ -82,10 +84,10 @@ def run_function(
         logger.info("Starting runtime service")
         service = QiskitRuntimeService()
         backend = service.backend(backend_name)
-        logger.info(f"backend: {backend.name}")
+        logger.info(f"Backend: {backend.name}")
     else:
         backend = testing_backend
-        logger.info(f"testing backend: {backend.name}")
+        logger.info(f"Testing backend: {backend.name}")
 
     # Configure `EstimatorOptions`, to control the parameters of the hardware
     # experiment.
