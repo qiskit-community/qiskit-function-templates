@@ -9,3 +9,6 @@ coverage>=4.4.0
 hypothesis>=4.24.3
 stestr>=2.0.0,!=4.0.0
 ddt>=1.2.0,!=1.4.0,!=1.4.3
+
+# Tox
+tox ~= 4.26

@@ -108,15 +108,10 @@ def run_function(
 
     # This example sets default options:
     estimator_default_options = {
+        # Add job tag to be able to track function usage
+        "environment": {"job_tags": ["my_function"]},
         "resilience": {
             "measure_mitigation": True,
-            "zne_mitigation": True,
-            "zne": {
-                "amplifier": "gate_folding",
-                "noise_factors": [1, 2, 3],
-                "extrapolated_noise_factors": list(np.linspace(0, 3, 31)),
-                "extrapolator": ["exponential", "linear", "fallback"],
-            },
             "measure_noise_learning": {
                 "num_randomizations": 512,
                 "shots_per_randomization": 512,
@@ -128,7 +123,7 @@ def run_function(
             "num_randomizations": 300,
             "shots_per_randomization": 100,
             "strategy": "active",
-        },
+        }
     }
     # And then merges them with user-provided options:
     estimator_options = merge(kwargs.get("estimator_options", {}), estimator_default_options)
