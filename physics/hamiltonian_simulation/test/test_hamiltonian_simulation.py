@@ -64,18 +64,22 @@ class TestHamiltonianSimulation(unittest.TestCase):
     def test_run(self):
         """Test run_function"""
 
+        aqc_options = {
+            "aqc_evolution_time": 0.2,
+            "aqc_ansatz_num_trotter_steps": 1,
+            "aqc_target_num_trotter_steps": 32,
+            "remainder_evolution_time": 0.2,
+            "remainder_num_trotter_steps": 4,
+            "aqc_max_iterations": 300,
+        }
+
         out = run_function(
-            initial_state=self.initial_state,
+            backend_name="ibm_fez",
             hamiltonian=self.hamiltonian,
             observable=self.observable,
-            backend_name="ibm_fez",
+            initial_state=self.initial_state,
             estimator_options={},
-            aqc_evolution_time=0.2,
-            aqc_ansatz_num_trotter_steps=1,
-            aqc_target_num_trotter_steps=32,
-            remainder_evolution_time=0.2,
-            remainder_num_trotter_steps=4,
-            aqc_max_iterations=300,
+            aqc_options=aqc_options,
             dry_run=True,
             testing_backend=FakeFez(),
         )

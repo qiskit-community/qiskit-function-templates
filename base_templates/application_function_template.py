@@ -18,7 +18,6 @@ import json
 import logging
 import traceback
 
-import numpy as np
 from mergedeep import merge
 
 from qiskit import QuantumCircuit
@@ -108,15 +107,10 @@ def run_function(
 
     # This example sets default options:
     estimator_default_options = {
+        # Add job tag to be able to track function usage
+        "environment": {"job_tags": ["my_function"]},
         "resilience": {
             "measure_mitigation": True,
-            "zne_mitigation": True,
-            "zne": {
-                "amplifier": "gate_folding",
-                "noise_factors": [1, 2, 3],
-                "extrapolated_noise_factors": list(np.linspace(0, 3, 31)),
-                "extrapolator": ["exponential", "linear", "fallback"],
-            },
             "measure_noise_learning": {
                 "num_randomizations": 512,
                 "shots_per_randomization": 512,
