@@ -18,7 +18,6 @@ import json
 import logging
 import traceback
 
-import numpy as np
 from mergedeep import merge
 
 from qiskit import QuantumCircuit
