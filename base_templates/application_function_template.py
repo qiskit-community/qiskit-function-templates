@@ -123,7 +123,7 @@ def run_function(
             "num_randomizations": 300,
             "shots_per_randomization": 100,
             "strategy": "active",
-        }
+        },
     }
     # And then merges them with user-provided options:
     estimator_options = merge(kwargs.get("estimator_options", {}), estimator_default_options)
