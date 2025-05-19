@@ -48,16 +48,13 @@ import quimb.tensor  # pylint: disable=wrong-import-position
 logger = logging.getLogger(__name__)
 
 
-# TODO: group inputs into categories
 def run_function(
     backend_name,
     hamiltonian,
     observable,
-    aqc_evolution_time=None,
-    aqc_ansatz_num_trotter_steps=None,
-    aqc_target_num_trotter_steps=None,
-    remainder_evolution_time=None,
-    remainder_num_trotter_steps=None,
+    initial_state=None,
+    aqc_options=None,
+    estimator_options={},
     **kwargs,
 ):
     """
@@ -67,14 +64,33 @@ def run_function(
     # Preparation Step: Input validation.
     # Do this at the top of the function definition so it fails early if any required
     # arguments are missing or invalid.
+
+    if aqc_options is not None:
+        aqc_evolution_time = aqc_options.get("aqc_evolution_time", None)
+        aqc_ansatz_num_trotter_steps = aqc_options.get("aqc_ansatz_num_trotter_steps", None)
+        aqc_target_num_trotter_steps = aqc_options.get("aqc_target_num_trotter_steps", None)
+        remainder_evolution_time = aqc_options.get("remainder_evolution_time", None)
+        remainder_num_trotter_steps = aqc_options.get("remainder_num_trotter_steps", None)
+
+        # Stop if this fidelity is achieved
+        aqc_stopping_fidelity = aqc_options.get("aqc_stopping_fidelity", 1.0)
+        # Stop after this number of iterations, even if stopping fidelity is not achieved
+        aqc_max_iterations = aqc_options.get("aqc_max_iterations", 500)
+    else:
+        aqc_evolution_time = None
+        aqc_ansatz_num_trotter_steps = None
+        aqc_target_num_trotter_steps = None
+        remainder_evolution_time = None
+        remainder_num_trotter_steps = None
+        aqc_stopping_fidelity = 1.0
+        aqc_max_iterations = 500
+
+    if initial_state is None:
+        initial_state = QuantumCircuit(hamiltonian.num_qubits)
+
+    # Parse kwargs for local testing
     dry_run = kwargs.get("dry_run", False)
     testing_backend = kwargs.get("testing_backend", None)
-
-    # Stop if this fidelity is achieved
-    aqc_stopping_fidelity = kwargs.get("aqc_stopping_fidelity", 1.0)
-    # Stop after this number of iterations, even if stopping fidelity is not achieved
-    aqc_max_iterations = kwargs.get("aqc_max_iterations", 500)
-    initial_state = kwargs.get("initial_state", QuantumCircuit(hamiltonian.num_qubits))
 
     # Preparation Step: Qiskit Runtime & primitive configuration for execution on IBM Quantum Hardware.
     if testing_backend is None:
@@ -112,17 +128,19 @@ def run_function(
             "shots_per_randomization": 100,
             "strategy": "active",
         },
+        # Add job tag to be able to track function usage
+        "environment": {"job_tags": ["hamsim_function"]},
     }
     # Merge with user-provided options
-    estimator_options = merge(kwargs.get("estimator_options", {}), estimator_default_options)
+    merged_estimator_options = merge(estimator_options, estimator_default_options)
 
     # When the function template is running, it is helpful to return
     # information in the logs by using print statements, so that you can better
     # evaluate the workload's progress. This example returns the estimator options.
-    logger.info(f"estimator_options = {json.dumps(estimator_options, indent=4)}")
+    logger.info(f"estimator_options = {json.dumps(merged_estimator_options, indent=4)}")
 
     # Initialize Estimator with options
-    estimator = Estimator(backend, options=estimator_options)
+    estimator = Estimator(backend, options=merged_estimator_options)
 
     # Perform parameter validation
     if not 0.0 < aqc_stopping_fidelity <= 1.0:
