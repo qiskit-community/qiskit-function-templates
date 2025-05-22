@@ -6,3 +6,4 @@ venv*
 .stestr/
 *.DS_Store*
 *.egg-info*
+output_*/
