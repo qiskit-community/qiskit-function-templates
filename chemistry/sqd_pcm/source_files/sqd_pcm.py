@@ -41,7 +41,7 @@ from qiskit_addon_sqd.fermion import bitstring_matrix_to_ci_strs
 from qiskit_addon_sqd.subsampling import postselect_and_subsample
 
 from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
-from qiskit_serverless import get_arguments, save_result, distribute_task, get
+from qiskit_serverless import get_arguments, save_result, distribute_task, get, update_status, Job
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
@@ -199,6 +199,9 @@ def run_function(
     # Step 1: Map
     # In this step, input arguments are used to construct relevant quantum circuits and operators
 
+    start_mapping = time.time()
+    update_status(Job.MAPPING)
+
     # Initialize the molecule object (pyscf)
     logger.info("Initializing molecule object")
     mol = gto.Mole()
@@ -305,10 +308,14 @@ def run_function(
     circuit.append(ffsim.qiskit.PrepareHartreeFockJW(norb, nelec), qubits)
     circuit.append(ffsim.qiskit.UCJOpSpinBalancedJW(ucj_op), qubits)
     circuit.measure_all()
+    end_mapping = time.time()
 
     # --
     # Step 2: Optimize
     # Transpile circuits to match ISA
+
+    start_optimizing = time.time()
+    update_status(Job.OPTIMIZING_HARDWARE)
 
     pass_manager = generate_preset_pass_manager(
         optimization_level=opt_level,
@@ -319,6 +326,7 @@ def run_function(
     pass_manager.pre_init = ffsim.qiskit.PRE_INIT
     transpiled = pass_manager.run(circuit)
 
+    end_optimizing = time.time()
     logger.info(
         f"Optimization level: {opt_level}, ops: {transpiled.count_ops()}, depth: {transpiled.depth()}"
     )
@@ -337,8 +345,18 @@ def run_function(
         logger.info(f"Job ID: {job.job_id()}")
         logger.info(f"Job Status: {job.status()}")
 
+        start_waiting_qpu = time.time()
+        while job.status() == "QUEUED":
+            update_status(Job.WAITING_QPU)
+            time.sleep(5)
+
+        end_waiting_qpu = time.time()
+        update_status(Job.EXECUTING_QPU)
+
         # Wait until job is complete
         result = job.result()
+        end_executing_qpu = time.time()
+
         pub_result = result[0]
         counts_dict = pub_result.data.meas.get_counts()
 
@@ -351,6 +369,9 @@ def run_function(
 
     # --
     # Step 4: Post-process
+
+    start_pp = time.time()
+    update_status(Job.POST_PROCESSING)
 
     # SQD-PCM section
     start = time.time()
@@ -474,9 +495,32 @@ def run_function(
         logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
         logger.info("-----------------------------------")
 
+        end_pp = time.time()
         end = time.time()
         duration = end - start
         logger.info(f"SCI_solver totally takes: {duration} seconds")
+
+        metadata = {
+            "resources_usage": {
+                {
+                    "RUNNING: MAPPING": {
+                        "CPU_TIME": end_mapping - start_mapping,
+                    },
+                    "RUNNING: OPTIMIZING_FOR_HARDWARE": {
+                        "CPU_TIME": end_optimizing - start_optimizing,
+                    },
+                    "RUNNING: WAITING_FOR_QPU": {
+                        "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
+                    },
+                    "RUNNING: EXECUTING_QPU": {
+                        "QPU_TIME": end_executing_qpu - end_waiting_qpu,
+                    },
+                    "RUNNING: POST_PROCESSING": {
+                        "CPU_TIME": end_pp - start_pp,
+                    },
+                },
+            }
+        }
 
         output = {
             "total_energy_hist": e_hist,
@@ -487,6 +531,7 @@ def run_function(
             "lowest_energy_value": np.min(e_hist[i, :]),
             "solvation_free_energy": g_solv_hist[i, lowest_e_batch_index],
             "sci_solver_total_duration": duration,
+            "metadata": metadata,
         }
 
         return output
