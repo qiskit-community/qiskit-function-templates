@@ -1,4 +1,4 @@
 # Requirements for "deploy_and_run" tutorials and end-to-end tests
-qiskit-ibm-catalog==0.5.0
-qiskit-ibm-runtime==0.38.0
+qiskit-ibm-catalog>=0.6.0
+qiskit-ibm-runtime>=0.39.0
 numpy~=2.2.5
