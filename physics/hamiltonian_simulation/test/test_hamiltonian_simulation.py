@@ -22,7 +22,7 @@ from qiskit import QuantumCircuit
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_ibm_runtime.fake_provider import FakeFez
 
-from ..source_files.hamiltonian_simulation import run_function
+from ..source_files.hamiltonian_sim_entrypoint import run_function
 
 
 class TestHamiltonianSimulation(unittest.TestCase):
