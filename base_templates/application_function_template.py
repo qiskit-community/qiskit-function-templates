@@ -47,15 +47,12 @@ def run_function(
     that are then invoked within ``run_function``.
 
     Args:
-        backend_name : str
-            Identifier for the target backend, required for all workflows that access
+        backend_name: Identifier for the target backend, required for all workflows that access
             IBM Quantum hardware.
-        *args
-            Positional arguments specific to the workflow (in this example, a string, a
+        *args: Positional arguments specific to the workflow (in this example, a string, a
             dictionary and an optional boolean flag). The argument types must be serializable
             by qiskit-serverless.
-        **kwargs
-            Optional keyword arguments to customize behavior (e.g., alternate paths
+        **kwargs: Optional keyword arguments to customize behavior (e.g., alternate paths
             for local testing). Use documented keywords where possible to maintain clarity.
             The argument types must be serializable by qiskit-serverless.
 
