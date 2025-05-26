@@ -20,7 +20,7 @@ import ray
 
 from qiskit_ibm_runtime.fake_provider import FakeHanoiV2
 
-from ..source_files.sqd_pcm import run_function
+from ..source_files.sqd_pcm_entrypoint import run_function
 from .data import test_molecule
 
 
