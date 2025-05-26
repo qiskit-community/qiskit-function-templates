@@ -360,12 +360,16 @@ def run_function(
         pub_result = result[0]
         counts_dict = pub_result.data.meas.get_counts()
 
+        waiting_qpu_time = end_waiting_qpu - start_waiting_qpu
+        executing_qpu_time = end_executing_qpu - end_waiting_qpu
     else:
         # read LUCJ samples from count_dict
         logger.info("Skipping sampler, loading counts dict from file")
         with open(count_dict_file_name, "r") as file:
             count_dict_string = file.read().replace("\n", "")
         counts_dict = json.loads(count_dict_string.replace("'", '"'))
+        waiting_qpu_time = 0
+        executing_qpu_time = 0
 
     # --
     # Step 4: Post-process
@@ -509,10 +513,10 @@ def run_function(
                     "CPU_TIME": end_optimizing - start_optimizing,
                 },
                 "RUNNING: WAITING_FOR_QPU": {
-                    "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
+                    "CPU_TIME": waiting_qpu_time,
                 },
                 "RUNNING: EXECUTING_QPU": {
-                    "QPU_TIME": end_executing_qpu - end_waiting_qpu,
+                    "QPU_TIME": executing_qpu_time,
                 },
                 "RUNNING: POST_PROCESSING": {
                     "CPU_TIME": end_pp - start_pp,
