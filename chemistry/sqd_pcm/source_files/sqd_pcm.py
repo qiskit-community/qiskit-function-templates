@@ -502,22 +502,20 @@ def run_function(
 
         metadata = {
             "resources_usage": {
-                {
-                    "RUNNING: MAPPING": {
-                        "CPU_TIME": end_mapping - start_mapping,
-                    },
-                    "RUNNING: OPTIMIZING_FOR_HARDWARE": {
-                        "CPU_TIME": end_optimizing - start_optimizing,
-                    },
-                    "RUNNING: WAITING_FOR_QPU": {
-                        "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
-                    },
-                    "RUNNING: EXECUTING_QPU": {
-                        "QPU_TIME": end_executing_qpu - end_waiting_qpu,
-                    },
-                    "RUNNING: POST_PROCESSING": {
-                        "CPU_TIME": end_pp - start_pp,
-                    },
+                "RUNNING: MAPPING": {
+                    "CPU_TIME": end_mapping - start_mapping,
+                },
+                "RUNNING: OPTIMIZING_FOR_HARDWARE": {
+                    "CPU_TIME": end_optimizing - start_optimizing,
+                },
+                "RUNNING: WAITING_FOR_QPU": {
+                    "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
+                },
+                "RUNNING: EXECUTING_QPU": {
+                    "QPU_TIME": end_executing_qpu - end_waiting_qpu,
+                },
+                "RUNNING: POST_PROCESSING": {
+                    "CPU_TIME": end_pp - start_pp,
                 },
             }
         }
