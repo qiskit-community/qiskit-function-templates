@@ -16,6 +16,7 @@ from typing import Any
 
 import json
 import logging
+import time
 import traceback
 
 from mergedeep import merge
@@ -27,7 +28,7 @@ from qiskit.transpiler import generate_preset_pass_manager
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime import EstimatorV2
 
-from qiskit_serverless import get_arguments, save_result
+from qiskit_serverless import get_arguments, save_result, update_status, Job
 
 logger = logging.getLogger(__name__)
 
@@ -146,13 +147,23 @@ def run_function(
     # Step 1: Map
     # In this step, input arguments are used to construct relevant quantum circuits and operators
     # This is a dummy example:
+    start_mapping = time.time()
+    # Report sub-status
+    update_status(Job.MAPPING)
+
     ansatz = QuantumCircuit(num_qubits)  # dummy circuit
     ansatz.measure_all()
     observable = SparsePauliOp.from_list(["Z"] * num_qubits)
+    end_mapping = time.time()
 
     # --
     # Step 2: Optimize
     # Transpile PUBs (circuits and observables) to match ISA
+
+    start_optimizing = time.time()
+    # Report sub-status
+    update_status(Job.OPTIMIZING_HARDWARE)
+
     pass_manager = generate_preset_pass_manager(backend=backend, optimization_level=2)
     isa_circuit = pass_manager.run(ansatz)
     isa_observable = observable.apply_layout(isa_circuit.layout)
@@ -160,6 +171,18 @@ def run_function(
     isa_2qubit_depth = isa_circuit.depth(lambda x: x.operation.num_qubits == 2)
     logger.info("ISA circuit two-qubit depth:", isa_2qubit_depth)
     output["twoqubit_depth"] = isa_2qubit_depth
+    end_optimizing = time.time()
+
+    output["metadata"] = {
+        "resources_usage": {
+            "RUNNING: MAPPING": {
+                "CPU_TIME": end_mapping - start_mapping,
+            },
+            "RUNNING: OPTIMIZING_FOR_HARDWARE": {
+                "CPU_TIME": end_optimizing - start_optimizing,
+            },
+        }
+    }
 
     # Exit now if dry run; don't execute on hardware
     if dry_run:
@@ -170,12 +193,23 @@ def run_function(
     # Step 3: Execute on Hardware
     # Submit the underlying Estimator job. Note that this is not the
     # actual function job.
+    start_waiting_qpu = time.time()
+
     job = estimator.run([(isa_circuit, isa_observable)])
     logger.info("Job ID:", job.job_id())
     output["job_id"] = job.job_id()
 
+    # Report sub-status based on queue status
+    while job.status() == "QUEUED":
+        update_status(Job.WAITING_QPU)
+        time.sleep(5)
+
+    end_waiting_qpu = time.time()
+    update_status(Job.EXECUTING_QPU)
+
     # Wait until job is complete
     hw_results = job.result()
+    end_executing_qpu = time.time()
     hw_results_dicts = [pub_result.data.__dict__ for pub_result in hw_results]
 
     # Save hardware results to serverless output dictionary
@@ -184,11 +218,30 @@ def run_function(
     # --
     # Step 4: Post-process
     # Reorganize expectation values
+    start_pp = time.time()
+    # Report sub-status
+    update_status(Job.POST_PROCESSING)
     hw_expvals = [pub_result_data["evs"].tolist() for pub_result_data in hw_results_dicts]
+    end_pp = time.time()
 
     # Return expectation values in serializable format
     logger.info("Hardware expectation values", hw_expvals)
     output["hw_expvals"] = hw_expvals[0]
+    output["metadata"]["resources_usage"]["RUNNING: WAITING_FOR_QPU"] = (
+        {
+            "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
+        },
+    )
+    output["metadata"]["resources_usage"]["RUNNING: EXECUTING_QPU"] = (
+        {
+            "CPU_TIME": end_executing_qpu - end_waiting_qpu,
+        },
+    )
+    output["metadata"]["resources_usage"]["RUNNING: POST_PROCESSING"] = (
+        {
+            "CPU_TIME": end_pp - start_pp,
+        },
+    )
     return output
 
 
