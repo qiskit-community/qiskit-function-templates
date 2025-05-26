@@ -28,7 +28,7 @@ from qiskit.transpiler import generate_preset_pass_manager
 from qiskit_ibm_runtime import QiskitRuntimeService, EstimatorV2
 from qiskit_ibm_runtime.runtime_job_v2 import RuntimeJobV2
 
-from qiskit_serverless import get_arguments, save_result
+from qiskit_serverless import get_arguments, save_result, update_status, Job
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,9 @@ class CircuitFunction:
         # --
         # Step 2: Optimize
         # Transpile PUBs (circuits and observables) to match ISA
+        # Report sub-status
+        update_status(Job.OPTIMIZING_HARDWARE)
+
         circuits = [pub.circuit for pub in self._pubs]
         all_pubs_params = [pub.parameter_values.as_array() for pub in self._pubs]
         pass_manager = generate_preset_pass_manager(
@@ -127,6 +130,11 @@ class CircuitFunction:
         self._jobs.append(job)
         logger.info("Qiskit Runtime job %s submitted.", job.job_id())
 
+        # Report sub-status based on queue status
+        while job.status() == "QUEUED":
+            update_status(Job.WAITING_QPU)
+
+        update_status(Job.EXECUTING_QPU)
         # In this case, the result is returned directly without post-processing,
         # but additional post-processing could be performed at this step
         # (Step 4 of the Qiskit Pattern)
