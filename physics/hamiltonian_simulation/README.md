@@ -1,5 +1,7 @@
 # Hamiltonian Simulation Template
 
+[Download Hamiltonian Simulation template](https://ibm.biz/ham-sim-template)
+
 ## Dependencies
 
 Default:
