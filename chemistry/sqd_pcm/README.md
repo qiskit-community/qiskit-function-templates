@@ -1,5 +1,7 @@
 # SQD IEF-PCM Template
 
+[Download SQD IEF-PCM template](https://ibm.biz/sqd-pcm-template)
+
 ### Table of contents
 
 * [About](#about)
