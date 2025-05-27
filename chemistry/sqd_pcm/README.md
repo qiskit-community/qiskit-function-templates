@@ -1,5 +1,7 @@
 # SQD IEF-PCM Template
 
+[Download SQD IEF-PCM template](https://download-directory.github.io/?url=https%3A%2F%2Fgithub.com%2Fqiskit-community%2Fqiskit-function-templates%2Ftree%2Fmain%2Fchemistry%2Fsqd_pcm)
+
 ### Table of contents
 
 * [About](#about)
