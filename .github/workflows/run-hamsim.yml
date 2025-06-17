@@ -4,10 +4,12 @@ name: Hamiltonian Simulation Tests
 on:
   push:
     branches: [main]
-
+    paths:
+          - 'physics/hamiltonian_simulation/**'
   pull_request:
     branches: [main]
-
+      paths:
+        - 'physics/hamiltonian_simulation/**'
   merge_group:
 
 concurrency:
