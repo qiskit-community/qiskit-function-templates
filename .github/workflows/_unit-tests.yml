@@ -6,7 +6,11 @@ on:
       dir:
         required: true
         type: string
-
+      os-list:
+        required: false
+        type: string
+        default: '["macOS-latest", "ubuntu-latest"]'
+        
 concurrency:
   group: ${{ github.repository }}-${{ github.ref }}-${{ github.head_ref }}
   cancel-in-progress: true
