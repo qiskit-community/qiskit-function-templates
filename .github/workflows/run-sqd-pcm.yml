@@ -1,14 +1,6 @@
 name: Hamiltonian Simulation Tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'chemistry/sqd_pcm/**'
-      - 'requirements-dev.txt'
-      - 'requirements-e2e.txt'
-      - 'tox.ini'
-
   pull_request:
     branches: [main]
     paths:
@@ -16,8 +8,6 @@ on:
       - 'requirements-dev.txt'
       - 'requirements-e2e.txt'
       - 'tox.ini'
-
-  merge_group:
 
 jobs:
   call-tests:
