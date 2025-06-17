@@ -1,66 +1,26 @@
----
 name: Hamiltonian Simulation Tests
 
 on:
   push:
     branches: [main]
     paths:
-          - 'physics/hamiltonian_simulation/**'
+      - 'physics/hamiltonian_simulation/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+
   pull_request:
     branches: [main]
-      paths:
-        - 'physics/hamiltonian_simulation/**'
+    paths:
+      - 'physics/hamiltonian_simulation/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+
   merge_group:
 
-concurrency:
-  group: ${{ github.repository }}-${{ github.ref }}-${{ github.head_ref }}
-  cancel-in-progress: true
-
 jobs:
-  tests:
-    if: github.repository_owner == 'qiskit-community'
-    name: ${{ matrix.os }}-arm64-tests-Python-${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    env:
-      DIR: physics/hamiltonian_simulation
-
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11"]
-        os: ["macOS-latest", "ubuntu-latest", "windows-latest"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      
-      - name: Install root dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -U -r requirements-dev.txt -c constraints.txt
-        shell: bash
-
-      - name: Install template-specific dependencies
-        shell: bash
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            # Windows runner but using bash
-            python -m pip install -U -r $DIR/requirements.txt -c constraints.txt
-          else
-            # macOS or Ubuntu
-            python -m pip install -U -r $DIR/requirements.txt -c constraints.txt
-          fi
-
-
-      - name: Run tests
-        shell: bash
-        run: |
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            stestr --test-path $DIR/test run
-          else
-            stestr --test-path $DIR/test run
-          fi
+  call-tests:
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      dir: physics/hamiltonian_simulation
