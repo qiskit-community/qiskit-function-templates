@@ -1,4 +1,4 @@
-name: Hamiltonian Simulation Tests
+name: SQD-PCM Tests
 
 on:
   pull_request:
