@@ -1,6 +1,14 @@
 name: Hamiltonian Simulation Tests
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'physics/hamiltonian_simulation/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+      
   pull_request:
     branches: [main]
     paths:

@@ -1,6 +1,14 @@
 name: SQD-PCM Tests
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'chemistry/sqd_pcm/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+      
   pull_request:
     branches: [main]
     paths:
