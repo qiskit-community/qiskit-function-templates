@@ -4,10 +4,12 @@ name: SQD PCM Tests
 on:
   push:
     branches: [main]
-
+    paths:
+          - 'chemistry/sqd_pcm/**'
   pull_request:
     branches: [main]
-
+      paths:
+        - 'chemistry/sqd_pcm/**'
   merge_group:
 
 concurrency:
