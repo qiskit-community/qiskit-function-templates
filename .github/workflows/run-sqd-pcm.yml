@@ -1,4 +1,4 @@
-name: Hamiltonian Simulation Tests
+name: SQD-PCM Tests
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - 'requirements-dev.txt'
       - 'requirements-e2e.txt'
       - 'tox.ini'
-
+      
   pull_request:
     branches: [main]
     paths:
@@ -16,8 +16,6 @@ on:
       - 'requirements-dev.txt'
       - 'requirements-e2e.txt'
       - 'tox.ini'
-
-  merge_group:
 
 jobs:
   call-tests:
