@@ -1,7 +1,7 @@
 # Hamiltonian Simulation Template
 
 > [!TIP]
-> [Download Hamiltonian Simulation template](https://ibm.biz/ham-sim-template)
+> [Download the Hamiltonian Simulation template](https://ibm.biz/ham-sim-template)
 >
 > [Deploy and run the template](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/hamiltonian_simulation/deploy_and_run.ipynb)
 
