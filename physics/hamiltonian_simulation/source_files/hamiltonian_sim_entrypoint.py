@@ -99,7 +99,11 @@ def run_function(
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
         logger.info("Starting runtime service")
-        service = QiskitRuntimeService()
+        service = QiskitRuntimeService(
+            channel=os.environ["QISKIT_IBM_CHANNEL"],
+            instance=os.environ["QISKIT_IBM_INSTANCE"],
+            token=os.environ["QISKIT_IBM_TOKEN"],
+        )
         backend = service.backend(backend_name)
         logger.info(f"Backend: {backend.name}")
     else:
