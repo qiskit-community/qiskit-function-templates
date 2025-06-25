@@ -345,8 +345,6 @@ def solve_solvent(
         amplitudes=np.array(sci_vec),
         ci_strs_a=sci_vec._strs[0],
         ci_strs_b=sci_vec._strs[1],
-        norb=num_orbitals,
-        nelec=(num_up, num_dn),
     )
 
     return e_sci, sci_state, avg_occupancy, spin_squared, g_solv
