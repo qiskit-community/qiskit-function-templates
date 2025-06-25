@@ -1,5 +1,5 @@
 # qiskit ecosystem (implicit qiskit dependency)
-qiskit_addon_sqd~=0.11.0
+qiskit_addon_sqd~=0.10.0
 qiskit-serverless
 qiskit-ibm-runtime
 
