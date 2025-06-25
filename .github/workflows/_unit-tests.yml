@@ -6,10 +6,6 @@ on:
       dir:
         required: true
         type: string
-      os-list:
-        required: false
-        type: string
-        default: '["macOS-latest", "ubuntu-latest"]'
 
 concurrency:
   group: ${{ github.repository }}-${{ github.ref }}-${{ github.head_ref }}
@@ -27,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11"]
-        os: ${{ fromJson(inputs.os-list) }}
+        os: ["macOS-latest", "ubuntu-latest", "windows-latest"]
 
     steps:
       - uses: actions/checkout@v4
