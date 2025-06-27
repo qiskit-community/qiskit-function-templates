@@ -38,7 +38,7 @@ SOLVENT = {
 }
 
 SQD = {
-    "sqd_iterations": 1,
+    "sqd_iterations": 2,
     "number_of_batches": 2,
     "samples_per_batch": 2,
     "max_davidson_cycles": 2,
