@@ -51,4 +51,4 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          stestr --test-path $DIR/test run --concurrency=1
+          stestr --test-path $DIR/test run
