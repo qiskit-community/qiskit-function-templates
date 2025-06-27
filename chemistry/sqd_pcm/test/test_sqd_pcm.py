@@ -15,6 +15,7 @@ SQD PCM Function Template unit tests.
 """
 import unittest
 from pathlib import Path
+from copy import deepcopy
 
 import ray
 
@@ -59,3 +60,21 @@ class TestSQDPCM(unittest.TestCase):
         # Review testing tolerance (high because of result variability)
         self.assertTrue(out["sci_solver_total_duration"] < 6)
         self.assertTrue(out["lowest_energy_value"] < -72)
+
+    def test_num_iter(self):
+        """Test sqd iterations"""
+
+        sqd_options = deepcopy(self.sqd_options)
+        sqd_options["sqd_iterations"] = 3
+
+        out = run_function(
+            backend_name=self.backend_name,
+            molecule=self.molecule,
+            solvent_options=self.solvent_options,
+            lucj_options={},
+            sqd_options=sqd_options,
+            testing_backend=FakeHanoiV2(),
+            files_name=self.datafiles_name,
+            count_dict_file_name=self.count_dict_name,
+        )
+        self.assertTrue(out["lowest_energy_batch"] != 0)

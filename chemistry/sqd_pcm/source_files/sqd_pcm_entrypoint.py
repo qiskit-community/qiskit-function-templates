@@ -503,44 +503,44 @@ def run_function(
         logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
         logger.info("-----------------------------------")
 
-        end_pp = time.time()
-        end = time.time()
-        duration = end - start
-        logger.info(f"SCI_solver totally takes: {duration} seconds")
+    end_pp = time.time()
+    end = time.time()
+    duration = end - start
+    logger.info(f"SCI_solver totally takes: {duration} seconds")
 
-        metadata = {
-            "resources_usage": {
-                "RUNNING: MAPPING": {
-                    "CPU_TIME": end_mapping - start_mapping,
-                },
-                "RUNNING: OPTIMIZING_FOR_HARDWARE": {
-                    "CPU_TIME": end_optimizing - start_optimizing,
-                },
-                "RUNNING: WAITING_FOR_QPU": {
-                    "CPU_TIME": waiting_qpu_time,
-                },
-                "RUNNING: EXECUTING_QPU": {
-                    "QPU_TIME": executing_qpu_time,
-                },
-                "RUNNING: POST_PROCESSING": {
-                    "CPU_TIME": end_pp - start_pp,
-                },
-            }
+    metadata = {
+        "resources_usage": {
+            "RUNNING: MAPPING": {
+                "CPU_TIME": end_mapping - start_mapping,
+            },
+            "RUNNING: OPTIMIZING_FOR_HARDWARE": {
+                "CPU_TIME": end_optimizing - start_optimizing,
+            },
+            "RUNNING: WAITING_FOR_QPU": {
+                "CPU_TIME": waiting_qpu_time,
+            },
+            "RUNNING: EXECUTING_QPU": {
+                "QPU_TIME": executing_qpu_time,
+            },
+            "RUNNING: POST_PROCESSING": {
+                "CPU_TIME": end_pp - start_pp,
+            },
         }
+    }
 
-        output = {
-            "total_energy_hist": e_hist,
-            "spin_squared_value_hist": s_hist,
-            "solvation_free_energy_hist": g_solv_hist,
-            "occupancy_hist": occupancy_hist,
-            "lowest_energy_batch": lowest_e_batch_index,
-            "lowest_energy_value": np.min(e_hist[i, :]),
-            "solvation_free_energy": g_solv_hist[i, lowest_e_batch_index],
-            "sci_solver_total_duration": duration,
-            "metadata": metadata,
-        }
+    output = {
+        "total_energy_hist": e_hist,
+        "spin_squared_value_hist": s_hist,
+        "solvation_free_energy_hist": g_solv_hist,
+        "occupancy_hist": occupancy_hist,
+        "lowest_energy_batch": lowest_e_batch_index,
+        "lowest_energy_value": np.min(e_hist[i, :]),
+        "solvation_free_energy": g_solv_hist[i, lowest_e_batch_index],
+        "sci_solver_total_duration": duration,
+        "metadata": metadata,
+    }
 
-        return output
+    return output
 
 
 def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
