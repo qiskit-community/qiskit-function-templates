@@ -1,6 +1,9 @@
 # SQD IEF-PCM Template
 
-[Download SQD IEF-PCM template](https://ibm.biz/sqd-pcm-template)
+> [!TIP]
+> [Download the SQD IEF-PCM template](https://ibm.biz/sqd-pcm-template)
+> 
+> [Deploy and run the template](https://github.com/qiskit-community/qiskit-function-templates/blob/main/chemistry/sqd_pcm/deploy_and_run.ipynb)
 
 ### Table of contents
 
