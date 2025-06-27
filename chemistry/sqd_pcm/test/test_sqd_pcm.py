@@ -59,3 +59,4 @@ class TestSQDPCM(unittest.TestCase):
         # Review testing tolerance (high because of result variability)
         self.assertTrue(out["sci_solver_total_duration"] < 6)
         self.assertTrue(out["lowest_energy_value"] < -72)
+        self.assertTrue(out["metadata"]["num_iterations_executed"] == 2)
