@@ -15,7 +15,6 @@ SQD PCM Function Template unit tests.
 """
 import unittest
 from pathlib import Path
-from copy import deepcopy
 
 import ray
 
