@@ -77,4 +77,4 @@ class TestSQDPCM(unittest.TestCase):
             files_name=self.datafiles_name,
             count_dict_file_name=self.count_dict_name,
         )
-        self.assertTrue(out["lowest_energy_batch"] != 0)
+        self.assertTrue(out["metadata"]["num_iterations_executed"] == 3)

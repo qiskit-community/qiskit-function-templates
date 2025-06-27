@@ -426,6 +426,7 @@ def run_function(
     occupancy_hist = []
     avg_occupancy = None
 
+    num_ran_iter = 0
     for i in range(iterations):
         logger.info(f"Starting configuration recovery iteration {i}")
         # On the first iteration, we have no orbital occupancy information from the
@@ -502,6 +503,7 @@ def run_function(
         logger.info(f"Lowest energy value: {np.min(e_hist[i, :])}")
         logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
         logger.info("-----------------------------------")
+        num_ran_iter += 1
 
     end_pp = time.time()
     end = time.time()
@@ -525,7 +527,8 @@ def run_function(
             "RUNNING: POST_PROCESSING": {
                 "CPU_TIME": end_pp - start_pp,
             },
-        }
+        },
+        "num_iterations_executed": num_ran_iter,
     }
 
     output = {
