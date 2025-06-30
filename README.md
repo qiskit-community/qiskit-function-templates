@@ -18,29 +18,29 @@
 
 This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless).
 
-Template implementations are realistic examples of how to build utility-scale application workflows with [Qiskit](https://docs.quantum.ibm.com/guides) and [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons). Spanning across application domains, these are starter kits that you can customize for your own research needs instead of starting from scratch. And they are easily deployable to [Qiskit Serverless](https://docs.quantum.ibm.com/guides/serverless) for managed execution.
-
-The base templates are references you can use for developing custom [Qiskit Functions](https://docs.quantum.ibm.com/guides/functions) using recommended best practices.
-
-#### Base Templates
-Qiskit Function *base templates* allow to kickstart the [Qiskit Function](https://docs.quantum.ibm.com/guides/functions) development process with best-practices in interface development, code formatting, unit testing, and more. The repository itself is exposed as a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository), so the CI/CD implementation can be easily extended by implementers to match new projects.
-
-There are currently two templates: a circuit function template and an application function template.
-
-<!-- <img src="tools/image.png" alt="image" width="500"/> -->
-
 #### Application Template Implementations
-Qiskit Function *template implementations* show different realizations of the application function template above that leverage [Qiskit Addons](https://docs.quantum.ibm.com/guides/addons) to run industry-relevant application workflows. These implementations are structured by application area, currently:
+
+Qiskit Function *template implementations* are realistic examples of how to build utility-scale application workflows with [Qiskit](https://docs.quantum.ibm.com/guides) and [Qiskit addons](https://docs.quantum.ibm.com/guides/addons). These are prebuilt workflows that you can customize for your own research needs instead of starting from scratch. To simplify execution and parallelization, they are easily deployable to [Qiskit Serverless](https://docs.quantum.ibm.com/guides/serverless).
+
+Implementations are organized by application area, which currently includes:
 
 - `physics`
 - `chemistry`
 
-Each implementation is contained in a directory in the corresponding application area, for example, for the hamiltonian simulation function: [`physics/hamiltonian_simulation`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/hamiltonian_simulation). The directory might contain additional files that can be uploaded to the serverless environment for the function execution.
+Each implementation is contained in a directory in the corresponding application area. For example, the Hamiltonian simulation function is contained in [`physics/hamiltonian_simulation`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/hamiltonian_simulation). The directory might contain additional files that can be uploaded to the serverless environment for the function execution.
 
 For convenience, we provide direct download links for each application template directory:
 
 - [Download Hamiltonian Simulation template](https://ibm.biz/ham-sim-template)
 - [Download SQD IEF-PCM template](https://ibm.biz/sqd-pcm-template)
+
+#### Base Templates
+
+Want to build your own custom [Qiskit Function](https://docs.quantum.ibm.com/guides/functions)? The *base templates* are references you can use to kickstart the Qiskit Function development process with best-practices in interface development, code formatting, unit testing, and more. The repository itself is exposed as a [GitHub template](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-template-repository) so that the CI/CD implementation can be easily extended to match your projects.
+
+There are currently two templates: a circuit function template and an application function template.
+
+<!-- <img src="tools/image.png" alt="image" width="500"/> -->
 
 ----------------------------------------------------------------------------------------------------
 
