@@ -343,8 +343,8 @@ def solve_solvent(
     assert isinstance(sci_vec._strs[0], np.ndarray) and isinstance(sci_vec._strs[1], np.ndarray)
     assert sci_vec.shape == (len(sci_vec._strs[0]), len(sci_vec._strs[1]))
     if (
-        int(vesion(qiskit_addon_sqd).split(".")[0]) == 0
-        and int(vesion(qiskit_addon_sqd).split(".")[1]) < 11
+        int(version("qiskit_addon_sqd").split(".")[0]) == 0
+        and int(version("qiskit_addon_sqd").split(".")[1]) < 11
     ):
         sci_state = SCIState(
             amplitudes=np.array(sci_vec),
