@@ -29,6 +29,7 @@ from qiskit_addon_sqd.fermion import (
     bitstring_matrix_to_ci_strs,
     _check_ci_strs,
 )
+from qiskit_addon_sqd import __version__ as addon_version
 
 # DSK Below is the modified CASCI kernel compatible with SQD.
 # It utilizes the "fci.selected_ci.kernel_fixed_space"
@@ -341,10 +342,19 @@ def solve_solvent(
     # have its _strs field populated with alpha and beta strings.
     assert isinstance(sci_vec._strs[0], np.ndarray) and isinstance(sci_vec._strs[1], np.ndarray)
     assert sci_vec.shape == (len(sci_vec._strs[0]), len(sci_vec._strs[1]))
-    sci_state = SCIState(
-        amplitudes=np.array(sci_vec),
-        ci_strs_a=sci_vec._strs[0],
-        ci_strs_b=sci_vec._strs[1],
-    )
+    if int(addon_version.split(".")[0]) == 0 and int(addon_version.split(".")[1]) < 11:
+        sci_state = SCIState(
+            amplitudes=np.array(sci_vec),
+            ci_strs_a=sci_vec._strs[0],
+            ci_strs_b=sci_vec._strs[1],
+        )
+    else:
+        sci_state = SCIState(
+            amplitudes=np.array(sci_vec),
+            ci_strs_a=sci_vec._strs[0],
+            ci_strs_b=sci_vec._strs[1],
+            norb=num_orbitals,
+            nelec=(num_up, num_dn),
+        )
 
     return e_sci, sci_state, avg_occupancy, spin_squared, g_solv
