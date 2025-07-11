@@ -9,6 +9,7 @@
 ### Table of contents
 
 * [About](#about)
+* [Documentation](#documentation)
 * [Contributing](#contributing)
 * [License](#license)
 
