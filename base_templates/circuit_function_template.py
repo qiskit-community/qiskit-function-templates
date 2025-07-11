@@ -80,7 +80,11 @@ class CircuitFunction:
             self._service = QiskitRuntimeService(channel="local")
             self._backend = self._service.backend(backend_name)
         else:
-            self._service = QiskitRuntimeService(instance=instance)
+            self._service = QiskitRuntimeService(
+                channel=os.environ["QISKIT_IBM_CHANNEL"],
+                instance=os.environ["QISKIT_IBM_INSTANCE"],
+                token=os.environ["QISKIT_IBM_TOKEN"],
+            )
             self._backend = self._service.backend(backend_name)
 
     def _set_options(self, options: dict | None = None) -> None:
