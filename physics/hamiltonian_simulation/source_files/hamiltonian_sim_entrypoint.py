@@ -329,7 +329,7 @@ def run_function(
     )
     output["metadata"]["resources_usage"]["RUNNING: EXECUTING_QPU"] = (
         {
-            "CPU_TIME": end_executing_qpu - end_waiting_qpu,
+            "QPU_TIME": end_executing_qpu - end_waiting_qpu,
         },
     )
     output["metadata"]["resources_usage"]["RUNNING: POST_PROCESSING"] = (
