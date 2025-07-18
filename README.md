@@ -47,7 +47,7 @@ There are currently two templates: a circuit function template and an applicatio
 
 ### Documentation
 
-The Qiskit Functio templates documentation is available [here](https://quantum.cloud.ibm.com/docs/en/guides/qiskit-function-templates).
+The Qiskit Function templates documentation is available [here](https://quantum.cloud.ibm.com/docs/en/guides/qiskit-function-templates).
 
 ----------------------------------------------------------------------------------------------------
 

@@ -224,7 +224,7 @@ def run_function(
 
     mf = scf.RHF(mol).PCM(cm)
     # Generation of checkpoint file for the solute and solvent
-    # which will be used reused in all subsequent sections
+    # which will be reused in all subsequent sections
     checkpoint_file_name = str(datafiles_name + ".chk")
     mf.chkfile = checkpoint_file_name
     mf.kernel()
@@ -259,7 +259,7 @@ def run_function(
     if myavas is not None:
         mc.mo_coeff = avas_out.mo_coeff
     mc.batch = None
-    # Reliable and most convinient way to do the CCSD on only the active space
+    # Reliable and most convenient way to do the CCSD on only the active space
     # is to create the FCIDUMP file and then run the CCSD calculation only on the
     # orbitals stored in the FCIDUMP file.
 
