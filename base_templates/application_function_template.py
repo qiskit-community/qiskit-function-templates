@@ -45,7 +45,7 @@ def run_function(
     Main entry point for the workflow.
 
     This function encapsulates the end-to-end execution of the desired algorithm.
-    Complex workflows should organize logic into well defined modules or classes
+    Complex workflows should organize logic into well-defined modules or classes
     that are then invoked within ``run_function``.
 
     Args:
