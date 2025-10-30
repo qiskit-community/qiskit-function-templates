@@ -40,8 +40,16 @@ from qiskit_addon_sqd.configuration_recovery import recover_configurations
 from qiskit_addon_sqd.fermion import bitstring_matrix_to_ci_strs
 from qiskit_addon_sqd.subsampling import postselect_and_subsample
 
-from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2
-from qiskit_serverless import get_arguments, save_result, distribute_task, get, update_status, Job
+from qiskit_ibm_runtime import SamplerV2
+from qiskit_serverless import (
+    get_arguments,
+    save_result,
+    distribute_task,
+    get,
+    update_status,
+    Job,
+    get_runtime_service,
+)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
@@ -173,11 +181,7 @@ def run_function(
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
         logger.info("Starting runtime service")
-        service = QiskitRuntimeService(
-            channel=os.environ["QISKIT_IBM_CHANNEL"],
-            instance=os.environ["QISKIT_IBM_INSTANCE"],
-            token=os.environ["QISKIT_IBM_TOKEN"],
-        )
+        service = get_runtime_service()
         backend = service.backend(backend_name)
         logger.info(f"Backend: {backend.name}")
 
@@ -187,6 +191,7 @@ def run_function(
         sampler.options.twirling.enable_measure = False
         sampler.options.twirling.enable_gates = use_twirling
         sampler.options.default_shots = num_shots
+        sampler.options.environment.job_tags = ["sqd_pcm_function"]
     else:
         backend = testing_backend
         logger.info(f"Testing backend: {backend.name}")
