@@ -16,11 +16,7 @@ on:
       - 'requirements-dev.txt'
       - 'requirements-e2e.txt'
       - 'tox.ini'
-
-concurrency:
-  group: sqdpcm-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true
-  
+      
 jobs:
   call-tests:
     uses: ./.github/workflows/_unit-tests.yml
