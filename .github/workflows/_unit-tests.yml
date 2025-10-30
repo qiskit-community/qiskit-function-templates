@@ -12,7 +12,7 @@ on:
         default: '["macOS-latest", "ubuntu-latest"]'
 
 concurrency:
-  group: ${{ github.repository }}-${{ github.ref }}-${{ github.head_ref }}
+  group: ${{ github.repository }}-${{ github.ref }}-${{ github.head_ref }}-${{ inputs.dir }}
   cancel-in-progress: true
 
 jobs:

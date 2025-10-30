@@ -39,10 +39,9 @@ from qiskit_addon_aqc_tensor.simulation import (
 from qiskit_addon_aqc_tensor.simulation.quimb import QuimbSimulator
 from qiskit_addon_aqc_tensor.objective import OneMinusFidelity
 
-from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 
-from qiskit_serverless import get_arguments, save_result, update_status, Job
+from qiskit_serverless import get_arguments, save_result, update_status, Job, get_runtime_service
 
 # this variable is required to import quimb.tensor
 os.environ["NUMBA_CACHE_DIR"] = "/data"
@@ -99,11 +98,7 @@ def run_function(
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
         logger.info("Starting runtime service")
-        service = QiskitRuntimeService(
-            channel=os.environ["QISKIT_IBM_CHANNEL"],
-            instance=os.environ["QISKIT_IBM_INSTANCE"],
-            token=os.environ["QISKIT_IBM_TOKEN"],
-        )
+        service = get_runtime_service()
         backend = service.backend(backend_name)
         logger.info(f"Backend: {backend.name}")
     else:
