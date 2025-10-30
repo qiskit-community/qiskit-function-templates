@@ -17,6 +17,10 @@ on:
       - 'requirements-e2e.txt'
       - 'tox.ini'
 
+concurrency:
+  group: hamiltonian-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: 
+  
 jobs:
   call-tests:
     uses: ./.github/workflows/_unit-tests.yml
