@@ -17,7 +17,6 @@ Hamiltonian Simulation Function Template source code.
 import os
 import datetime
 import json
-import logging
 import time
 import traceback
 import numpy as np
@@ -41,13 +40,20 @@ from qiskit_addon_aqc_tensor.objective import OneMinusFidelity
 
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 
-from qiskit_serverless import get_arguments, save_result, update_status, Job, get_runtime_service
+from qiskit_serverless import (
+    get_arguments,
+    save_result,
+    update_status,
+    Job,
+    get_runtime_service,
+    get_logger,
+)
 
 # this variable is required to import quimb.tensor
 os.environ["NUMBA_CACHE_DIR"] = "/data"
 import quimb.tensor  # pylint: disable=wrong-import-position
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def run_function(
@@ -335,30 +341,11 @@ def run_function(
     return output
 
 
-def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
-    """Logger setup to communicate logs through serverless."""
-
-    log_fmt = "%(module)s.%(funcName)s:%(levelname)s:%(asctime)s: %(message)s"
-    formatter = logging.Formatter(log_fmt)
-
-    # Set propagate to `False` since handlers are to be attached.
-    my_logger.propagate = False
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    my_logger.addHandler(stream_handler)
-    my_logger.setLevel(level)
-
-
 # This is the section where `run_function` is called, it's boilerplate code and can be used
 # without customization.
 if __name__ == "__main__":
     # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
-
-    # Allow to configure logging level
-    logging_level = input_args.get("logging_level", logging.INFO)
-    set_up_logger(logger, logging_level)
 
     try:
         func_result = run_function(**input_args)
