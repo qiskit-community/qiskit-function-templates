@@ -19,7 +19,6 @@ from datetime import datetime
 import os
 import sys
 import json
-import logging
 import time
 import traceback
 import numpy as np
@@ -49,13 +48,14 @@ from qiskit_serverless import (
     update_status,
     Job,
     get_runtime_service,
+    get_logger,
 )
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 from solve_solvent import solve_solvent  # pylint: disable=wrong-import-position
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def run_function(
@@ -551,31 +551,12 @@ def run_function(
     return output
 
 
-def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
-    """Logger setup to communicate logs through serverless."""
-
-    log_fmt = "%(module)s.%(funcName)s:%(levelname)s:%(asctime)s: %(message)s"
-    formatter = logging.Formatter(log_fmt)
-
-    # Set propagate to `False` since handlers are to be attached.
-    my_logger.propagate = False
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    my_logger.addHandler(stream_handler)
-    my_logger.setLevel(level)
-
-
 # This is the section where `run_function` is called, it's boilerplate code and can be used
 # without customization.
 if __name__ == "__main__":
 
     # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
-
-    # Allow to configure logging level
-    logging_level = input_args.get("logging_level", logging.INFO)
-    set_up_logger(logger, logging_level)
 
     try:
         func_result = run_function(**input_args)

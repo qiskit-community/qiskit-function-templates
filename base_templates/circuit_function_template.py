@@ -15,8 +15,6 @@ Circuit Function Template source code.
 from __future__ import annotations
 
 from collections.abc import Iterable
-import logging
-import os
 import traceback
 
 import numpy as np
@@ -25,12 +23,19 @@ from qiskit.primitives.containers import EstimatorPubLike, PrimitiveResult
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.transpiler import generate_preset_pass_manager
 
-from qiskit_ibm_runtime import QiskitRuntimeService, EstimatorV2
+from qiskit_ibm_runtime import EstimatorV2
 from qiskit_ibm_runtime.runtime_job_v2 import RuntimeJobV2
 
-from qiskit_serverless import get_arguments, save_result, update_status, Job
+from qiskit_serverless import (
+    get_arguments,
+    save_result,
+    update_status,
+    Job,
+    get_runtime_service,
+    get_logger,
+)
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CircuitFunction:
@@ -76,16 +81,8 @@ class CircuitFunction:
         # Validate and set input backend
         if not backend_name:
             raise ValueError(f"Invalid backend_name value {backend_name}.")
-        if os.environ.get("LOCAL_TESTING", "false").lower() == "true":
-            self._service = QiskitRuntimeService(channel="local")
-            self._backend = self._service.backend(backend_name)
-        else:
-            self._service = QiskitRuntimeService(
-                channel=os.environ["QISKIT_IBM_CHANNEL"],
-                instance=os.environ["QISKIT_IBM_INSTANCE"],
-                token=os.environ["QISKIT_IBM_TOKEN"],
-            )
-            self._backend = self._service.backend(backend_name)
+        service = get_runtime_service()
+        self._backend = service.backend(backend_name)
 
     def _set_options(self, options: dict | None = None) -> None:
         """Set options from the input."""
@@ -145,30 +142,11 @@ class CircuitFunction:
         return job.result()
 
 
-def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
-    """Logger setup to communicate logs through serverless."""
-
-    log_fmt = "%(module)s.%(funcName)s:%(levelname)s:%(asctime)s: %(message)s"
-    formatter = logging.Formatter(log_fmt)
-
-    # Set propagate to `False` since handlers are to be attached.
-    my_logger.propagate = False
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    my_logger.addHandler(stream_handler)
-    my_logger.setLevel(level)
-
-
 # This is the section where `CircuitFunction` is initialized and ran, it's
 # boilerplate code and can be used without customization.
 if __name__ == "__main__":
     # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
-
-    # Allow to configure logging level
-    logging_level = input_args.get("logging_level", logging.INFO)
-    set_up_logger(logger, logging_level)
 
     try:
         func = CircuitFunction(**input_args)

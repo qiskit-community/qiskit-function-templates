@@ -12,11 +12,9 @@
 """
 Application Function Template source code.
 """
-import os
 from typing import Any
 
 import json
-import logging
 import time
 import traceback
 
@@ -26,12 +24,18 @@ from qiskit import QuantumCircuit
 from qiskit.quantum_info import SparsePauliOp
 from qiskit.transpiler import generate_preset_pass_manager
 
-from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_ibm_runtime import EstimatorV2
 
-from qiskit_serverless import get_arguments, save_result, update_status, Job
+from qiskit_serverless import (
+    get_arguments,
+    save_result,
+    update_status,
+    Job,
+    get_runtime_service,
+    get_logger,
+)
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 def run_function(
@@ -93,13 +97,9 @@ def run_function(
     if testing_backend is None:
         # Initialize Qiskit Runtime Service
         logger.info("Starting runtime service")
-        service = QiskitRuntimeService(
-            channel=os.environ["QISKIT_IBM_CHANNEL"],
-            instance=os.environ["QISKIT_IBM_INSTANCE"],
-            token=os.environ["QISKIT_IBM_TOKEN"],
-        )
+        service = get_runtime_service()
         backend = service.backend(backend_name)
-        logger.info("backend", backend)
+        logger.info(f"Backend: {backend.name}")
     else:
         backend = testing_backend
 
@@ -250,30 +250,11 @@ def run_function(
     return output
 
 
-def set_up_logger(my_logger: logging.Logger, level: int = logging.INFO) -> None:
-    """Logger setup to communicate logs through serverless."""
-
-    log_fmt = "%(module)s.%(funcName)s:%(levelname)s:%(asctime)s: %(message)s"
-    formatter = logging.Formatter(log_fmt)
-
-    # Set propagate to `False` since handlers are to be attached.
-    my_logger.propagate = False
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    my_logger.addHandler(stream_handler)
-    my_logger.setLevel(level)
-
-
 # This is the section where `run_function` is called, it's boilerplate code and can be used
 # without customization.
 if __name__ == "__main__":
     # Use serverless helper function to extract input arguments,
     input_args = get_arguments()
-
-    # Allow to configure logging level
-    logging_level = input_args.get("logging_level", logging.INFO)
-    set_up_logger(logger, logging_level)
 
     try:
         func_result = run_function(**input_args)
