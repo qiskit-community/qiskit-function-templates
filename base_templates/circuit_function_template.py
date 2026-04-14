@@ -15,11 +15,12 @@ Circuit Function Template source code.
 from __future__ import annotations
 
 from collections.abc import Iterable
+import time
 import traceback
 
 import numpy as np
 
-from qiskit.primitives.containers import EstimatorPubLike, PrimitiveResult
+from qiskit.primitives.containers import EstimatorPubLike
 from qiskit.primitives.containers.estimator_pub import EstimatorPub
 from qiskit.transpiler import generate_preset_pass_manager
 
@@ -91,7 +92,7 @@ class CircuitFunction:
         self._execution_options = options.get("execution_options", None)
         # Here, additional options such as error mitigation options could be set
 
-    def run(self) -> PrimitiveResult:
+    def run(self) -> dict:
         """Execute the request."""
 
         # The circuit function encapsulates steps 2-4 of the Qiskit Pattern workflow:
@@ -100,6 +101,7 @@ class CircuitFunction:
         # --
         # Step 2: Optimize
         # Transpile PUBs (circuits and observables) to match ISA
+        start_optimizing = time.time()
         # Report sub-status
         update_status(Job.OPTIMIZING_HARDWARE)
 
@@ -121,12 +123,15 @@ class CircuitFunction:
             isa_pub = (isa_circ, isa_observables, params, pub.precision)
             isa_pubs.append(EstimatorPub.coerce(isa_pub))
 
+        end_optimizing = time.time()
+
         # --
         # Step 3: Execute on Hardware
         # Initialize EstimatorV2
         estimator = EstimatorV2(mode=self._backend, options=self._execution_options)
 
         # Run
+        start_waiting_qpu = time.time()
         job = estimator.run(pubs=isa_pubs)
         self._jobs.append(job)
         logger.info("Qiskit Runtime job %s submitted.", job.job_id())
@@ -135,11 +140,45 @@ class CircuitFunction:
         while job.status() == "QUEUED":
             update_status(Job.WAITING_QPU)
 
+        end_waiting_qpu = time.time()
         update_status(Job.EXECUTING_QPU)
+
+        # Wait until job is complete
+        hw_results = job.result()
+        end_executing_qpu = time.time()
+
+        # --
+        # Step 4: Post-process
         # In this case, the result is returned directly without post-processing,
         # but additional post-processing could be performed at this step
         # (Step 4 of the Qiskit Pattern)
-        return job.result()
+        start_pp = time.time()
+        update_status(Job.POST_PROCESSING)
+        end_pp = time.time()
+
+        metadata = {
+            "resources_usage": {
+                "RUNNING: OPTIMIZING_FOR_HARDWARE": {
+                    "CPU_TIME": end_optimizing - start_optimizing,
+                },
+                "RUNNING: WAITING_FOR_QPU": {
+                    "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
+                },
+                "RUNNING: EXECUTING_QPU": {
+                    "QPU_TIME": end_executing_qpu - end_waiting_qpu,
+                },
+                "RUNNING: POST_PROCESSING": {
+                    "CPU_TIME": end_pp - start_pp,
+                },
+            },
+        }
+
+        output = {
+            "hw_results": hw_results,
+            "metadata": metadata,
+        }
+
+        return output
 
 
 # This is the section where `CircuitFunction` is initialized and ran, it's
