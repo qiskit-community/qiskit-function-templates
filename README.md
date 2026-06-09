@@ -11,6 +11,7 @@
 * [About](#about)
 * [Documentation](#documentation)
 * [Contributing](#contributing)
+* [Citing this project](#citing-this-project)
 * [License](#license)
 
 ----------------------------------------------------------------------------------------------------
@@ -60,6 +61,12 @@ in the root of this project's repository.
 By participating, you are expected to uphold Qiskit's [code of conduct](https://github.com/Qiskit/qiskit/blob/main/CODE_OF_CONDUCT.md).
 
 We use [GitHub issues](https://github.com/Qiskit/qiskit-function-templates/issues/new/choose) for tracking requests and bugs.
+
+----------------------------------------------------------------------------------------------------
+
+### Citing this project
+
+If you use a template in your research, please cite it according to the citation information listed on the README file of the corresponding template.
 
 ----------------------------------------------------------------------------------------------------
 
