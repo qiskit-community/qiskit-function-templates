@@ -66,7 +66,7 @@ We use [GitHub issues](https://github.com/Qiskit/qiskit-function-templates/issue
 
 ### Citing this project
 
-If you use a template in your research, please cite it according to the citation information listed on the README.md of the corresponding template.
+If you use a template in your research, please cite it according to the citation information listed on the README file of the corresponding template.
 
 ----------------------------------------------------------------------------------------------------
 
