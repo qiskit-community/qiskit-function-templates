@@ -11,6 +11,7 @@
 * [Methodology](#methodology)
 * [Workflow sections](#workflow-sections)
 * [Dependencies](#dependencies)
+* [Citing this project](#citing-this-project)
 * [References](#references)
 
 ----------------------------------------------------------------------------------------------------
@@ -47,7 +48,7 @@ It generates one-electron and two-electron integrals within the defined active s
 It takes as the input the [PySCF Checkpoint file](https://github.com/pyscf/pyscf.github.io/blob/master/examples/misc/02-chkfile.py) containing the HF IEF-PCM information, the bitstrings representing the electron configurations predicted by LUCJ, as well as the user-defined SQD options selected in the input section. As an output it produces the SQD IEF-PCM total energy of the lowest energy batch as well as the corresponding solvation free energy. 
 
 
-## Dependencies
+### Dependencies
 
 Default:
 ```
@@ -60,6 +61,36 @@ Custom:
 ffsim==0.0.54
 pyscf==2.9.0
 qiskit_addon_sqd==0.12.0
+```
+
+----------------------------------------------------------------------------------------------------
+### Citing this project
+
+This project was developed collaboratively with IBM and Cleveland Clinic. If you use the SQD IEF-PCM template in your research, please use the following to cite the appropriate references:
+
+```bibtex
+@software{sqd-pcm-template,
+  author = {Kaliakin, Danil and Shajan, Akhil and Liang, Fangchun and Peña Tapia, Elena and Rossmannek, Max and Johnson, Caleb and Merz, Kenneth M. Jr.},
+  title = {{SQD IEF-PCM Qiskit function template}},
+  howpublished = {\url{https://github.com/qiskit-community/qiskit-function-templates/tree/main/chemistry/sqd_pcm}},
+  year = {2025}
+}
+```
+
+If your work leveraged the ideas presented in the source code of the SQD IEF-PCM template, consider citing the initial research by Cleveland Clinic, which demonstrated the scalability of SQD IEF-PCM simulations and whose source code informed the implementation provided in this repository:
+
+```bibtex
+@article{sqd-pcm-research,
+  author = {Kaliakin, Danil and Shajan, Akhil and Liang, Fangchun and Merz, Kenneth M. Jr.},
+  title = {{Implicit Solvent Sample-Based Quantum Diagonalization}},
+  journal = {The Journal of Physical Chemistry B},
+  volume = {129},
+  number = {23},
+  pages = {5788-5796},
+  year = {2025},
+  doi = {10.1021/acs.jpcb.5c01030},
+  URL = {https://doi.org/10.1021/acs.jpcb.5c01030},
+}
 ```
 
 ----------------------------------------------------------------------------------------------------
