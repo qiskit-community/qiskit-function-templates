@@ -1,0 +1,79 @@
+---
+name: Base Template Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'base_templates/**'
+      - 'tools/validate_base_templates.py'
+      - '.github/workflows/validate-base-templates.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'base_templates/**'
+      - 'tools/validate_base_templates.py'
+      - '.github/workflows/validate-base-templates.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -U -r requirements-dev.txt -c constraints.txt
+          # Install dependencies needed by base templates
+          python -m pip install qiskit qiskit-ibm-runtime qiskit-serverless mergedeep
+        shell: bash
+
+      - name: Validate template structure
+        run: |
+          python tools/validate_base_templates.py --check-structure
+        shell: bash
+
+      - name: Validate template imports
+        run: |
+          python tools/validate_base_templates.py --check-imports
+        shell: bash
+
+      - name: Validate template signatures
+        run: |
+          python tools/validate_base_templates.py --check-signatures
+        shell: bash
+
+      - name: Validate docstrings
+        run: |
+          python tools/validate_base_templates.py --check-docstrings
+        shell: bash
+
+      - name: Run doctest on templates
+        run: |
+          python -m doctest base_templates/application_function_template.py -v
+          python -m doctest base_templates/circuit_function_template.py -v
+        shell: bash
+        continue-on-error: true
+
+      - name: Lint base templates
+        run: |
+          python -m black --check base_templates/
+          python -m pylint base_templates/
+        shell: bash
+
+      - name: Check copyright headers
+        run: |
+          python tools/verify_headers.py base_templates
+        shell: bash
