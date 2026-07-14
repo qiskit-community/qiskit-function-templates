@@ -1,6 +1,5 @@
 # Circuit Function Template
 
-> [!TIP]
 > [Download the Circuit Function template](https://github.com/qiskit-community/qiskit-function-templates/tree/main/circuit_functions/vanilla)
 >
 > [Deploy and run the template](https://github.com/qiskit-community/qiskit-function-templates/blob/main/circuit_functions/vanilla/deploy_and_run_circuit_function.ipynb)
