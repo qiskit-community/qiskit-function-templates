@@ -1,0 +1,25 @@
+name: Circuit Function - Vanilla Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'circuit_functions/vanilla/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+
+  pull_request:
+    branches: [main]
+    paths:
+      - 'circuit_functions/vanilla/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+
+jobs:
+  call-tests:
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      dir: circuit_functions/vanilla
+      os-list: '["macOS-latest", "ubuntu-latest", "windows-latest"]'

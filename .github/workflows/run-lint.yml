@@ -41,6 +41,6 @@ jobs:
 
       - name: PyLint — code analysis
         run: |
-          python -m pylint physics chemistry base_templates
+          python -m pylint physics chemistry base_templates circuit_functions
         env:
           PYLINTRC: .pylintrc
