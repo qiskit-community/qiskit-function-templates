@@ -1,0 +1,9 @@
+qiskit>=2.0.0
+qiskit-ibm-runtime>=0.47.0
+qiskit-serverless>=0.20.0
+numpy>=1.26.0
+pydantic>=2.0.0
+
+# Test-only: the unit tests simulate the submitted quantum program with a seeded Aer
+# sampler (FakeExecutor), because the runtime Executor has no local mode.
+qiskit-aer>=0.15
