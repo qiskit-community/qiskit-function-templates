@@ -10,13 +10,16 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 """
-Shared helpers for the Executor Function Template tests: pub/input builders and a
-``FakeExecutor`` test double that stands in for the runtime Executor (which cannot run
-locally) by simulating the submitted quantum program with a seeded Aer sampler.
+Shared helpers for the Executor Function Template tests: pub/input builders, a
+Cartesian-product ``@data`` decorator, and a ``FakeExecutor`` test double that stands in for
+the runtime Executor (which cannot run locally) by simulating the submitted quantum program
+with a seeded Aer sampler.
 """
 
+import itertools
 from unittest import mock
 
+from ddt import data, unpack
 from qiskit.circuit.random import random_circuit
 from qiskit_aer.primitives import SamplerV2 as AerSampler
 
@@ -55,6 +58,32 @@ def dict_partially_equal(dict1: dict, dict2: dict) -> bool:
         elif key not in dict1 or val != dict1[key]:
             return False
     return True
+
+
+class Case(dict):
+    """A single ddt test case; carries ``__doc__``/``__name__`` for readable ids."""
+
+
+def generate_cases(docstring, name=None, **kwargs):
+    """Combine kwargs in Cartesian product and return a list of Case objects."""
+    ret = []
+    for values in itertools.product(*kwargs.values()):
+        case = Case(zip(kwargs.keys(), values))
+        if docstring is not None:
+            setattr(case, "__doc__", docstring.format(**case))
+        if name is not None:
+            setattr(case, "__name__", name.format(**case))
+        ret.append(case)
+    return ret
+
+
+def combine(**kwargs):
+    """Decorator that expands kwargs as a Cartesian-product @data."""
+
+    def deco(func):
+        return data(*generate_cases(docstring=func.__doc__, **kwargs))(unpack(func))
+
+    return deco
 
 
 class _FakeJob:
