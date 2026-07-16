@@ -420,15 +420,21 @@ def run_function(
         if are_circuits_dynamic(estimator_pubs):
             raise ValueError("Dynamic circuits are not supported in estimator mode.")
 
-        precision = resolve_precision(estimator_pubs)
         default_shots = execution_options.get("default_shots")
         default_precision = execution_options.get("default_precision")
+        # Estimator mode is precision-driven: a pub precision wins, otherwise default_precision
+        # sets the target. default_shots acts only as a floor on the derived shot count. The
+        # resolved precision (which may come from default_precision) is recorded in the result
+        # metadata as target_precision.
+        precision = resolve_precision(estimator_pubs)
+        if precision is None:
+            precision = default_precision
         if precision is not None:
             shots = int(np.ceil(1.0 / (precision**2)))
+            if default_shots is not None:
+                shots = max(shots, int(default_shots))
         elif default_shots is not None:
             shots = int(default_shots)
-        elif default_precision is not None:
-            shots = int(np.ceil(1.0 / (default_precision**2)))
         else:
             raise ValueError(
                 "Estimator mode needs a precision (on the pub or via default_precision) "

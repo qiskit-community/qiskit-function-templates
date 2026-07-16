@@ -177,6 +177,36 @@ class TestEstimatorMode(BaseExecutorTestCase):
         )
         self.assertEqual(result["hw_results"][0].metadata["target_precision"], 0.05)
 
+    def test_default_precision_propagates_to_metadata(self):
+        """A precision supplied via default_precision (no pub precision) is recorded as
+        target_precision."""
+        result = run_function(
+            **get_inputs(
+                backend_name=self._backend_name,
+                pubs=[(random_circuit(2, 2, seed=42), "ZZ")],
+                mode="estimator",
+                options={"default_precision": 0.2},
+            ),
+            testing_backend=self._testing_backend,
+        )
+        self.assertEqual(result["hw_results"][0].metadata["target_precision"], 0.2)
+
+    def test_default_shots_is_a_floor_in_estimator_mode(self):
+        """When both are set, default_shots floors the precision-derived shot count while the
+        precision still drives (and is recorded)."""
+        result = run_function(
+            **get_inputs(
+                backend_name=self._backend_name,
+                pubs=[(random_circuit(2, 2, seed=42), "ZZ")],
+                mode="estimator",
+                options={"default_precision": 0.5, "default_shots": 4096},
+            ),
+            testing_backend=self._testing_backend,
+        )
+        # precision 0.5 -> 4 shots, floored up to 4096; precision still recorded as the target.
+        self.assertEqual(result["hw_results"][0].metadata["target_precision"], 0.5)
+        self.assertGreaterEqual(result["hw_results"][0].metadata["shots"], 4096)
+
 
 class TestDryRun(BaseExecutorTestCase):
     """A dry run stops after optimization without producing hardware results."""
