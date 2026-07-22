@@ -55,8 +55,12 @@ class _MockJobStatus:
     POST_PROCESSING = "POST_PROCESSING"
 
 
-if "qiskit_serverless" not in sys.modules or isinstance(
-    sys.modules["qiskit_serverless"], mock.MagicMock
+# Only stub for hermetic unit runs. When QISKIT_FUNCTION_NAME is set we are running the live
+# e2e suite (see test/e2e/base_e2e_test_case.py), which needs the real qiskit_serverless SDK
+# to reach a deployed function — stubbing it here would shadow ServerlessClient with a mock.
+if not os.environ.get("QISKIT_FUNCTION_NAME") and (
+    "qiskit_serverless" not in sys.modules
+    or isinstance(sys.modules["qiskit_serverless"], mock.MagicMock)
 ):
     _qs_mock = mock.MagicMock()
     _qs_mock.__path__ = []  # marks it as a package to the import machinery

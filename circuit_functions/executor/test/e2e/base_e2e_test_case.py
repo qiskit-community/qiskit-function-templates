@@ -10,13 +10,11 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 """
-Base test case for the executor end-to-end tests against a live serverless cluster.
+Base test case for the executor end-to-end tests against IBM Quantum Platform serverless.
 """
 
 import os
 import unittest
-
-from qiskit_serverless import ServerlessClient
 
 # python-dotenv is an optional local-dev convenience (loads a .env file). It is
 # not a declared test dependency, so fall back to a no-op when it is absent —
@@ -32,12 +30,13 @@ except ImportError:  # pragma: no cover
 
 load_dotenv()
 
-# Required env vars (set in .env or the shell before running):
+# The suite is skipped unless QISKIT_FUNCTION_NAME is set. Point it at a function you have
+# deployed to IBM Quantum Platform (see the deploy-and-run notebook) with these env vars:
 #
-#   GATEWAY_URL          e.g. http://localhost:8000
-#   GATEWAY_TOKEN        e.g. my_token
-#   QISKIT_FUNCTION_NAME e.g. provider/executor_function_template
-#   QISKIT_IBM_BACKEND   e.g. fake_manila (local) or ibm_kingston (real hw)
+#   QISKIT_IBM_TOKEN     your IBM Quantum Platform API key
+#   QISKIT_IBM_CRN       your instance CRN (crn:v1:...)
+#   QISKIT_FUNCTION_NAME e.g. executor_function_template
+#   QISKIT_IBM_BACKEND   e.g. ibm_kingston
 #
 # The template run_function returns a dict:
 #   {"hw_results": PrimitiveResult, "metadata": {...}}
@@ -49,9 +48,9 @@ load_dotenv()
 
 
 class BaseE2eTestCase(unittest.TestCase):
-    """Base class for end-to-end tests against a live serverless cluster.
+    """Base class for end-to-end tests against IBM Quantum Platform serverless.
 
-    These tests require a deployed function and cluster credentials. When
+    These tests require a deployed function and platform credentials. When
     ``QISKIT_FUNCTION_NAME`` is not set in the environment (the default in CI
     and for ``tox -ecircuit-executor``), the whole class is skipped so the
     unit-test run stays green without credentials.
@@ -59,19 +58,26 @@ class BaseE2eTestCase(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Connect to the cluster and load the deployed function, or skip if unconfigured."""
+        """Connect to IBM Quantum Platform and load the deployed function, or skip if unconfigured."""
         if not os.environ.get("QISKIT_FUNCTION_NAME"):
             raise unittest.SkipTest(
-                "E2e tests require a live serverless cluster. Set GATEWAY_URL, "
-                "GATEWAY_TOKEN, QISKIT_FUNCTION_NAME and QISKIT_IBM_BACKEND "
+                "E2e tests require a function deployed to IBM Quantum Platform. Set "
+                "QISKIT_IBM_TOKEN, QISKIT_IBM_CRN, QISKIT_FUNCTION_NAME and QISKIT_IBM_BACKEND "
                 "(or add them to a .env file in the template directory) to run them."
             )
 
-        cls._client = ServerlessClient(
-            host=os.environ.get("GATEWAY_URL", "http://localhost:8000"),
-            token=os.environ.get("GATEWAY_TOKEN", "my_token"),
+        # qiskit_ibm_catalog authenticates to IBM Quantum Platform with an API token and an
+        # instance CRN, and loads the deployed function with .load(). Imported here (not at
+        # module scope) so the unit-test run — which skips this class — never needs the SDK.
+        # pylint: disable=import-outside-toplevel
+        from qiskit_ibm_catalog import QiskitServerless
+
+        cls._client = QiskitServerless(
+            channel="ibm_quantum_platform",
+            token=os.environ.get("QISKIT_IBM_TOKEN"),
+            instance=os.environ.get("QISKIT_IBM_CRN"),
         )
-        cls._func = cls._client.get(os.environ["QISKIT_FUNCTION_NAME"])
+        cls._func = cls._client.load(os.environ["QISKIT_FUNCTION_NAME"])
         cls._backend_name = os.environ["QISKIT_IBM_BACKEND"]
 
         return super().setUpClass()
