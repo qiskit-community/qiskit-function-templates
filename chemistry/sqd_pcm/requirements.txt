@@ -1,6 +1,6 @@
 # qiskit ecosystem (implicit qiskit dependency)
 qiskit_addon_sqd~=0.11.0
-qiskit-serverless
+qiskit-serverless[ray]
 qiskit-ibm-runtime
 
 # external packages
