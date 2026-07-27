@@ -17,8 +17,6 @@ Base test case for the end-to-end tests against IBM Quantum Platform serverless.
 import os
 import unittest
 
-from qiskit_serverless import ServerlessClient
-
 # python-dotenv is an optional local-dev convenience (loads a .env file). It is
 # not a declared test dependency, so fall back to a no-op when it is absent —
 # the e2e tests are skipped anyway unless the required env vars are set.
