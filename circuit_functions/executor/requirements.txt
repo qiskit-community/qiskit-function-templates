@@ -1,5 +1,8 @@
 qiskit>=2.0.0
-qiskit-ibm-runtime>=0.47.0
+# Capped below 0.48: that release relocated executor_sampler.prepare and changed its
+# signature (dropped `backend`) and twirling-option validation, which the entrypoint here
+# relies on. Bump the cap once the entrypoint is updated for the newer API.
+qiskit-ibm-runtime>=0.47.0,<0.48
 qiskit-serverless>=0.20.0
 numpy>=1.26.0
 pydantic>=2.0.0
