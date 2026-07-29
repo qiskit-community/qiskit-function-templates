@@ -1,0 +1,12 @@
+qiskit>=2.0.0
+# 0.48 relocated executor_sampler.prepare and dropped its `backend` parameter; the
+# entrypoint targets that newer API (pubs are pre-transpiled to ISA before prepare()).
+qiskit-ibm-runtime>=0.48
+# >=0.34 is the first release whose pin allows qiskit-ibm-runtime 0.48 (0.33 caps it below 0.48).
+qiskit-serverless>=0.34
+numpy>=1.26.0
+pydantic>=2.0.0
+
+# Test-only: the unit tests simulate the submitted quantum program with a seeded Aer
+# sampler (FakeExecutor), because the runtime Executor has no local mode.
+qiskit-aer>=0.15
