@@ -319,7 +319,16 @@ def _to_sampler_options(execution_options: dict) -> SamplerOptions:
         for key in ("default_shots", "max_execution_time", "dynamical_decoupling", "twirling")
         if key in execution_options
     }
-    return SamplerOptions(**mapped)
+    sampler_options = SamplerOptions(**mapped)
+    # runtime >=0.48 validates that the twirling flags are real booleans: prepare() raises
+    # IBMInputValueError if either is left as None. The template only turns twirling on at
+    # mitigation level 2; below that the flags are unset, so pin them to False explicitly to
+    # keep the no-twirling path (plain circuit items) that None implied under runtime 0.47.
+    if sampler_options.twirling.enable_gates is None:
+        sampler_options.twirling.enable_gates = False
+    if sampler_options.twirling.enable_measure is None:
+        sampler_options.twirling.enable_measure = False
+    return sampler_options
 
 
 def _isa_sampler_pubs(sampler_pubs: list[SamplerPub], backend, optimization_level: int):
@@ -449,7 +458,7 @@ def run_function(
 
     isa_pubs = _isa_sampler_pubs(sampler_pubs, backend, optimization_level)
     program, executor_options = prepare_sampler_program(
-        isa_pubs, _to_sampler_options(execution_options), backend, default_shots=shots
+        isa_pubs, _to_sampler_options(execution_options), default_shots=shots
     )
 
     end_optimizing = time.time()

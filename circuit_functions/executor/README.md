@@ -9,7 +9,7 @@
 Default:
 ```
 qiskit>=2.0.0
-qiskit-ibm-runtime>=0.47.0
+qiskit-ibm-runtime>=0.48.0
 qiskit-serverless>=0.20.0
 numpy>=1.26.0
 pydantic>=2.0.0
