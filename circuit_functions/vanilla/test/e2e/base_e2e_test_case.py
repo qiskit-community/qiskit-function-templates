@@ -10,7 +10,6 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 """
-Base test case for the end-to-end tests against a live serverless cluster.
 Base test case for the end-to-end tests against IBM Quantum Platform serverless.
 """
 
