@@ -232,21 +232,15 @@ def run_function(
     # Return expectation values in serializable format
     logger.info("Hardware expectation values", hw_expvals)
     output["hw_expvals"] = hw_expvals[0]
-    output["metadata"]["resources_usage"]["RUNNING: WAITING_FOR_QPU"] = (
-        {
-            "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
-        },
-    )
-    output["metadata"]["resources_usage"]["RUNNING: EXECUTING_QPU"] = (
-        {
-            "CPU_TIME": end_executing_qpu - end_waiting_qpu,
-        },
-    )
-    output["metadata"]["resources_usage"]["RUNNING: POST_PROCESSING"] = (
-        {
-            "CPU_TIME": end_pp - start_pp,
-        },
-    )
+    output["metadata"]["resources_usage"]["RUNNING: WAITING_FOR_QPU"] = {
+        "CPU_TIME": end_waiting_qpu - start_waiting_qpu,
+    }
+    output["metadata"]["resources_usage"]["RUNNING: EXECUTING_QPU"] = {
+        "CPU_TIME": end_executing_qpu - end_waiting_qpu,
+    }
+    output["metadata"]["resources_usage"]["RUNNING: POST_PROCESSING"] = {
+        "CPU_TIME": end_pp - start_pp,
+    }
     return output
 
 
