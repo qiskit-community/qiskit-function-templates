@@ -23,7 +23,7 @@ The function itself is experiment-agnostic: it consumes a Hamiltonian, a state a
 list of observables, and returns a time series. The physics-specific setup and analysis
 stay on your side of that boundary.
 
-### Why AQC
+### Why AQC?
 
 Plain Trotter evolution costs you circuit depth linear in the number of steps: reaching
 step `k` means executing `k` copies of the per-step brickwork. On hardware that depth is
@@ -453,7 +453,7 @@ If you use this template in your research, please cite it:
 
 ```bibtex
 @software{trotter-aqc-hamiltonian-template,
-  author = {TODO: template authors},
+  author = {Danve, Parth},
   title = {{AQC+Trotter Hamiltonian Dynamics Qiskit function template}},
   howpublished = {\url{https://github.com/qiskit-community/qiskit-function-templates/tree/main/physics/trotter_aqc_hamiltonian}},
   year = {2026}

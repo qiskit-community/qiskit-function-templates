@@ -45,6 +45,7 @@ These are **complete, self-contained implementations** organized by application 
 
 - **[`physics/`](physics/)** - Physics-related function templates
   - [`hamiltonian_simulation/`](physics/hamiltonian_simulation/) - Hamiltonian simulation implementation
+  - [`trotter_aqc_hamiltonian/`](physics/trotter_aqc_hamiltonian/) - AQC+Trotter Hamiltonian dynamics implementation
   
 - **[`chemistry/`](chemistry/)** - Chemistry-related function templates
   - [`sqd_pcm/`](chemistry/sqd_pcm/) - SQD IEF-PCM implementation
@@ -222,6 +223,9 @@ future regressions. To run the tests, you can use `tox`:
 ```bash
 # Run tests for Hamiltonian Simulation
 tox -ehamsim
+
+# Run tests for AQC+Trotter Hamiltonian Dynamics
+tox -etrotter-aqc
 
 # Run tests for SQD PCM
 tox -esqdpcm
