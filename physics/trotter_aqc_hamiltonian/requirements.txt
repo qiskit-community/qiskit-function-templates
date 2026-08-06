@@ -1,0 +1,23 @@
+# Dependency set for the AQC+Trotter Hamiltonian dynamics template.
+#
+# .github/workflows/_unit-tests.yml installs *this* file and nothing else before
+# running the suite, so test-only packages have to live here too (see the bottom
+# of the file). Only direct anchors are listed; pip resolves the rest
+# transitively (numpy, scipy, pydantic, quimb, qiskit-quimb, jax/jaxlib, cotengra).
+
+qiskit~=2.4.0
+# The [ray] extra is the fan-out substrate for `parallel_sim` (source/execute.py).
+qiskit-serverless[ray]
+# fake-backend + runtime estimator paths (source/execute.py)
+qiskit-ibm-runtime
+
+# Stage-2 AQC stack; pulls quimb, qiskit-quimb, jax(+jaxlib), cotengra.
+qiskit-addon-aqc-tensor[quimb-jax]
+# Rust contraction-path backend that quimb/cotengra pick up automatically. Not
+# pulled in transitively, and without it AQC compression falls back to a far more
+# memory-heavy contraction path.
+cotengrust
+
+# Test-only: the fake-backend execution path (backend="fake") builds its noise
+# model with Aer. _unit-tests.yml installs this file, so it must live here.
+qiskit-aer>=0.15
