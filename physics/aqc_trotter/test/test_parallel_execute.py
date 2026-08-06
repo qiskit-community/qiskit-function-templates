@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover
 # Ray serialises the remote chunk function by reference, so each worker process
 # re-imports the module it lives in. Workers don't inherit the driver's sys.path,
 # so the repository root — the anchor for the
-# ``physics.trotter_aqc_hamiltonian.source_files.source.execute`` import path —
+# ``physics.aqc_trotter.source_files.source.execute`` import path —
 # has to be handed to them explicitly via the runtime environment.
 _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 _WORKER_PYTHONPATH = os.pathsep.join(p for p in (_REPO_ROOT, os.environ.get("PYTHONPATH", "")) if p)

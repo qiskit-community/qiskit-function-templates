@@ -1,9 +1,9 @@
 # AQC+Trotter Hamiltonian Dynamics Template
 
 > [!TIP]
-> [Download the AQC+Trotter Hamiltonian Dynamics template](https://github.com/qiskit-community/qiskit-function-templates/tree/main/physics/trotter_aqc_hamiltonian)
+> [Download the AQC+Trotter Hamiltonian Dynamics template](https://github.com/qiskit-community/qiskit-function-templates/tree/main/physics/aqc_trotter)
 >
-> [Deploy and run the template](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/trotter_aqc_hamiltonian/deploy_and_run.ipynb)
+> [Deploy and run the template](https://github.com/qiskit-community/qiskit-function-templates/blob/main/physics/aqc_trotter/deploy_and_run.ipynb)
 
 ## Overview
 
@@ -452,10 +452,10 @@ twirling, and measurement mitigation (TREX) — is configured via
 If you use this template in your research, please cite it:
 
 ```bibtex
-@software{trotter-aqc-hamiltonian-template,
+@software{aqc-trotter-template,
   author = {Danve, Parth},
   title = {{AQC+Trotter Hamiltonian Dynamics Qiskit function template}},
-  howpublished = {\url{https://github.com/qiskit-community/qiskit-function-templates/tree/main/physics/trotter_aqc_hamiltonian}},
+  howpublished = {\url{https://github.com/qiskit-community/qiskit-function-templates/tree/main/physics/aqc_trotter}},
   year = {2026}
 }
 ```

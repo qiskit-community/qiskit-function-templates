@@ -34,7 +34,7 @@ Each implementation is contained in a directory in the corresponding application
 For convenience, we provide direct download links for each application template directory:
 
 - [Download Hamiltonian Simulation template](https://ibm.biz/ham-sim-template)
-- [Download AQC+Trotter Hamiltonian Dynamics template](https://download-directory.github.io/?url=https%3A%2F%2Fgithub.com%2Fqiskit-community%2Fqiskit-function-templates%2Ftree%2Fmain%2Fphysics%2Ftrotter_aqc_hamiltonian)
+- [Download AQC+Trotter Hamiltonian Dynamics template](https://download-directory.github.io/?url=https%3A%2F%2Fgithub.com%2Fqiskit-community%2Fqiskit-function-templates%2Ftree%2Fmain%2Fphysics%2Faqc_trotter)
 - [Download SQD IEF-PCM template](https://ibm.biz/sqd-pcm-template)
 
 #### Base Templates
