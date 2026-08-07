@@ -33,7 +33,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 # ── Fallback stubs ──────────────────────────────────────────────────────────
 # Used only for the symbols the installed qiskit_serverless does not expose (see
 # the per-symbol binding below). When qiskit_serverless is fully present, none of
-# these are bound and behaviour is exactly the genuine gateway one.
+# these are bound and behavior is exactly the genuine gateway one.
 
 
 class _StubServerlessError(Exception):

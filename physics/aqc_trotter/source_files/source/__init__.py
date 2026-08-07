@@ -12,7 +12,7 @@
 
 """AQC-compressed Hamiltonian dynamics — an experiment-agnostic Qiskit application function.
 
-Trotterize the time evolution of any 1-D nearest-neighbour Pauli Hamiltonian,
+Trotterize the time evolution of any 1-D nearest-neighbor Pauli Hamiltonian,
 compress the leading steps with AQC (tensor-network MPS fidelity), and execute
 with error mitigation, returning the expectation value of each observable at
 each time step.

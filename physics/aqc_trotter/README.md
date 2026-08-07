@@ -31,14 +31,14 @@ what eventually buries the signal in noise.
 
 AQC ([approximate quantum compiling](https://qiskit.github.io/qiskit-addon-aqc-tensor/))
 trades classical work for that depth. For each of the leading time steps, it classically
-optimises a *fixed, shallow* parametrised ansatz until its state matches the deep Trotter
+optimizes a *fixed, shallow* parametrized ansatz until its state matches the deep Trotter
 target, scoring the match as an MPS fidelity with a tensor-network simulator. The circuit
 you actually execute at step `k` is then the shallow ansatz — its depth does not grow
 with `k`.
 
 The trade has two sides worth knowing before you commit:
 
-- **You pay in classical time and memory.** Compression runs one optimisation per
+- **You pay in classical time and memory.** Compression runs one optimization per
   compressed step, and its memory footprint grows steeply with
   [`aqc_options.max_bond`](#aqc_options). This is the dominant classical cost of a run.
 - **It only works while the target state stays MPS-representable.** Entanglement grows
@@ -107,7 +107,7 @@ default. The Hamiltonian's `num_qubits` fixes the chain length.
 | `t_steps` | `int` | `>=1` | **yes** | — | Total Trotter steps. Evolves to `T = t_steps · dt` and reports every observable at each `t_k = k·dt` (`t_0` is the prepared state before any evolution). |
 | `aqc_segments` | `list` of `{n_steps, ansatz_steps}` | non-empty; `sum(n_steps) ≤ t_steps` | **yes** | — | AQC compression plan. Each segment compresses its `n_steps` leading time steps into an ansatz generated from the `ansatz_steps`-Trotter target. `sum(n_steps)` steps are compressed; the rest run as plain Trotter ([detail below](#aqc_segments)). |
 | `dt` | `float` | `>0` | no | `0.2` | Physical time advanced by one Trotter step (`exp(-i·dt·H)`). |
-| `hamiltonian` | `SparsePauliOp` | — | **yes** | — | 1-D nearest-neighbour Pauli Hamiltonian, given as a `SparsePauliOp`. Its `num_qubits` sets the chain length — there is no separate `n` input ([detail below](#hamiltonian)). |
+| `hamiltonian` | `SparsePauliOp` | — | **yes** | — | 1-D nearest-neighbor Pauli Hamiltonian, given as a `SparsePauliOp`. Its `num_qubits` sets the chain length — there is no separate `n` input ([detail below](#hamiltonian)). |
 | `initial_state` | `QuantumCircuit` | — | no | `\|0…0⟩` | Prepared state to evolve; bake any local kick into this circuit ([detail below](#initial_state)). |
 | `observables` | `EstimatorV2` observables \| `null` | — | no | single-site `Z` | Exactly what you pass `EstimatorV2` PUB as `observables` — `SparsePauliOp` / `Pauli` / `PauliList` / Pauli string / `{pauli: coeff}` / (nested) list; one observable per output column ([detail below](#observables)). |
 | `trotter_options` | `object` | — | no | 2nd-order Suzuki | Trotter product-formula synthesis: `{"method": ..., "synthesis_settings": {...}}` ([detail below](#trotter_options)). |
@@ -125,7 +125,7 @@ default. The Hamiltonian's `num_qubits` fixes the chain length.
 An ordered list of segments. Each compresses its `n_steps` consecutive leading time steps
 into one ansatz, generated from the `ansatz_steps`-Trotter target — so `ansatz_steps`
 sets the ansatz *depth*, and `n_steps` sets how many time steps reuse it. Larger
-`ansatz_steps` means more parameters, more optimisation time, and fidelity that holds
+`ansatz_steps` means more parameters, more optimization time, and fidelity that holds
 further out in time.
 
 Steps are assigned to segments in order. `sum(n_steps)` must be `≤ t_steps`; any
@@ -159,7 +159,7 @@ confirm the compression is actually buying you depth.
 <a id="hamiltonian"></a>
 #### `hamiltonian`
 The Hamiltonian is a [`SparsePauliOp`](https://quantum.cloud.ibm.com/docs/api/qiskit/qiskit.quantum_info.SparsePauliOp) over `n` qubits, passed natively (Qiskit
-Serverless serialises it over the wire). It should be a 1-D nearest-neighbour Pauli
+Serverless serializes it over the wire). It should be a 1-D nearest-neighbor Pauli
 operator — single-qubit fields and two-qubit couplings on adjacent sites — so that
 2nd-order Trotter synthesis stays at most 2-qubit and AQC's MPS builder accepts every
 gate.
@@ -171,7 +171,7 @@ Strings are Pauli/σ operators, not spin-½ — there is no implicit factor of �
 ```python
 from qiskit.quantum_info import SparsePauliOp
 
-# Heisenberg: XX+YY+ZZ at 0.5 on every nearest-neighbour bond
+# Heisenberg: XX+YY+ZZ at 0.5 on every nearest-neighbor bond
 H = SparsePauliOp.from_sparse_list(
     [(p, [i, i + 1], 0.5) for i in range(n - 1) for p in ("XX", "YY", "ZZ")],
     num_qubits=n,
@@ -214,8 +214,8 @@ H = SparsePauliOp.from_sparse_list(
 <a id="initial_state"></a>
 #### `initial_state`
 A prepared [`QuantumCircuit`](https://quantum.cloud.ibm.com/docs/api/qiskit/qiskit.circuit.QuantumCircuit) passed natively (default `|0…0⟩` when omitted). This is
-the direct form for Python callers handing in a ground state they optimised
-themselves (DMRG / VQE / …); Qiskit Serverless QPY-serialises it over the wire.
+the direct form for Python callers handing in a ground state they optimized
+themselves (DMRG / VQE / …); Qiskit Serverless QPY-serializes it over the wire.
 
 The function never builds model-specific states for you. To start from a
 computational-basis product state (e.g. a Néel state), build a tiny circuit of `X`
@@ -228,7 +228,7 @@ from qiskit import QuantumCircuit
 neel = QuantumCircuit(n)
 for i in range(0, n, 2):        # X on even sites -> |0101…01⟩
     neel.x(i)
-neel.rz(1.5708, n // 2)         # optional local kick: Z-rotation by π/2 at the centre
+neel.rz(1.5708, n // 2)         # optional local kick: Z-rotation by π/2 at the center
 # → pass it in the call: fn.run(..., initial_state=neel)
 ```
 
@@ -241,8 +241,8 @@ measured separately and becomes one output column (`EstimatorV2` returns one
 expectation value per element the same way).
 
 Pauli strings follow Qiskit's ordering (leftmost char = highest qubit index) and cover
-all `n` qubits. Labels: a single unit-coefficient Pauli is labelled by its string;
-anything else (a multi-term operator) is labelled `obs_0`, `obs_1`, …. Use
+all `n` qubits. Labels: a single unit-coefficient Pauli is labeled by its string;
+anything else (a multi-term operator) is labeled `obs_0`, `obs_1`, …. Use
 `SparsePauliOp.from_sparse_list` for site-local operators or correlators without writing
 the full-width string:
 
@@ -306,7 +306,7 @@ These knobs tune the [`qiskit-addon-aqc-tensor`](https://qiskit.github.io/qiskit
 
 | field | default | meaning |
 |-------|---------|---------|
-| `max_bond` | `32` | MPS bond dimension cap during fidelity optimisation|
+| `max_bond` | `32` | MPS bond dimension cap during fidelity optimization|
 | `cutoff` | `1e-8` | MPS singular-value truncation cutoff |
 | `autodiff_backend` | `"jax"` | gradient backend (`"jax"` or `"explicit"`) |
 | `fidelity_target` | `null` | if set (0–1], early-stop each step once this fidelity is reached |
@@ -363,7 +363,7 @@ from qiskit.quantum_info import SparsePauliOp
 n = 10
 gs = QuantumCircuit(n)
 # ... prepare your ground state here (e.g. a DMRG/VQE circuit) ...
-gs.rz(1.5708, 5)               # local Z-kick (π/2) at the chain centre, before evolution
+gs.rz(1.5708, 5)               # local Z-kick (π/2) at the chain center, before evolution
 
 H = SparsePauliOp.from_sparse_list(                                  # Heisenberg
     [(p, [i, i + 1], 0.5) for i in range(n - 1) for p in ("XX", "YY", "ZZ")],
@@ -439,7 +439,7 @@ in *where* circuits run. Select one with `backend=` in the call.
 
 On the two local paths every time-step circuit is independent, so `parallel_sim=True`
 fans them across all available cores via Ray (one task per chunk of circuits); the
-default `False` runs them sequentially. It has no effect on `runtime`, which parallelises
+default `False` runs them sequentially. It has no effect on `runtime`, which parallelizes
 via `batches` instead.
 
 Mitigation on the `fake`/`runtime` paths — dynamical decoupling (XY4), gate Pauli

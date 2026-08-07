@@ -80,7 +80,7 @@ class TestDynamics(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # The run is expensive (AQC optimisation), so it is shared by every test
+        # The run is expensive (AQC optimization), so it is shared by every test
         # in this class — none of them mutate the result.
         cls.result = _run(
             {

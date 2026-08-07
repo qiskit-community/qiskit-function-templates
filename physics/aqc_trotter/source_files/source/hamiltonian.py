@@ -24,7 +24,7 @@ Tiers
 -----
 ``pauli_1d_nn`` : the only tier currently registered. The caller supplies the
                   Hamiltonian directly as a :class:`~qiskit.quantum_info.SparsePauliOp`
-                  over ``n`` qubits. It is expected to be a 1D nearest-neighbour
+                  over ``n`` qubits. It is expected to be a 1D nearest-neighbor
                   Pauli operator (single-qubit fields + two-qubit couplings on
                   adjacent sites) so Trotter synthesis stays at most 2-qubit and
                   the AQC MPS builder accepts every gate. Heisenberg / XXZ /
@@ -66,11 +66,11 @@ class HamiltonianSpec:
 
 @dataclass
 class Pauli1DNNSpec(HamiltonianSpec):
-    """1D nearest-neighbour Pauli Hamiltonian, supplied as a ``SparsePauliOp``.
+    """1D nearest-neighbor Pauli Hamiltonian, supplied as a ``SparsePauliOp``.
 
     ``operator`` is the Hamiltonian over ``n`` qubits, given directly as a
     :class:`~qiskit.quantum_info.SparsePauliOp`. It is expected to be a 1D
-    nearest-neighbour Pauli operator — single-qubit fields and two-qubit
+    nearest-neighbor Pauli operator — single-qubit fields and two-qubit
     couplings on adjacent sites — so that 2nd-order Trotter synthesis produces
     at-most-2-qubit gates that AQC's MPS builder accepts. Heisenberg, XXZ and
     disorder / random-field models are all just different ``operator`` values,

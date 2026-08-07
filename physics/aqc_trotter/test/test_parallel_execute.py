@@ -39,7 +39,7 @@ try:
 except ImportError:  # pragma: no cover
     HAS_RAY = False
 
-# Ray serialises the remote chunk function by reference, so each worker process
+# Ray serializes the remote chunk function by reference, so each worker process
 # re-imports the module it lives in. Workers don't inherit the driver's sys.path,
 # so the repository root — the anchor for the
 # ``physics.aqc_trotter.source_files.source.execute`` import path —
@@ -134,7 +134,7 @@ class TestParallelSimNotFannedOut(unittest.TestCase):
     """`parallel_sim=True` requests that never reach Ray, so no cluster is needed."""
 
     def test_single_pub_not_fanned_out(self):
-        """A single PUB is never parallelised, even with parallel_sim=True."""
+        """A single PUB is never parallelized, even with parallel_sim=True."""
         n = 4
         pubs = _pubs(n, 1)
         out = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=True))

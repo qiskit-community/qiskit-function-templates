@@ -45,7 +45,7 @@ from ._serverless import get_logger, get_runtime_service
 
 # Optional Ray fan-out for the in-process simulation paths (statevector / fake).
 # Ray is used directly (ray.remote / ray.get) rather than through a wrapper. On
-# the gateway it is already initialised; otherwise `_run_parallel` starts a
+# the gateway it is already initialized; otherwise `_run_parallel` starts a
 # per-core cluster on first use. If ray is not installed the parallel path
 # disables itself and execution falls back to the sequential loop.
 try:  # pragma: no cover - present wherever ray is installed
@@ -78,9 +78,9 @@ class ExecutionOptions:
     on_status: Optional[Callable[[str], None]] = None
     # Local-sim fan-out toggle (statevector/fake only). True -> split the
     # per-time-step PUBs across all cores Ray sees (chunked into Ray tasks);
-    # False -> the sequential loop (default, unchanged behaviour). Ignored when
+    # False -> the sequential loop (default, unchanged behavior). Ignored when
     # Ray is absent or there is a single PUB. The runtime/QPU path is unaffected
-    # (it parallelises via `batches`).
+    # (it parallelizes via `batches`).
     parallel_sim: bool = False
 
 
@@ -97,7 +97,7 @@ def _run_statevector(pubs: list[PubLike]) -> np.ndarray:
 # Default fake backend: a snapshot of the 127-qubit IBM Sherbrooke device
 # (heavy-hex, real measured noise). 127 qubits hosts any realistic chain, and
 # the local Aer estimator only simulates the active qubits, so the full width is
-# free. Chains larger than this fall back to a synthesised GenericBackendV2.
+# free. Chains larger than this fall back to a synthesized GenericBackendV2.
 _DEFAULT_FAKE = "fake_sherbrooke"
 
 
@@ -107,7 +107,7 @@ def _make_fake_backend(n_qubits: int, opts: ExecutionOptions):
     ``opts.backend_name`` selects a device-derived fake from
     ``qiskit_ibm_runtime.fake_provider`` (e.g. ``"fake_sherbrooke"``); an
     explicitly named one must have enough qubits. With no name we default to
-    Sherbrooke (127 qubits, real noise) and only synthesise a ``GenericBackendV2``
+    Sherbrooke (127 qubits, real noise) and only synthesize a ``GenericBackendV2``
     if the chain is larger than that — so any ``n`` works out of the box.
     """
     from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
@@ -128,7 +128,7 @@ def _make_fake_backend(n_qubits: int, opts: ExecutionOptions):
     from qiskit.providers.fake_provider import GenericBackendV2
 
     logger.info(
-        "Chain (%d qubits) exceeds %s (%d qubits); using a synthesised "
+        "Chain (%d qubits) exceeds %s (%d qubits); using a synthesized "
         "GenericBackendV2 instead.",
         n_qubits,
         name,
@@ -243,7 +243,7 @@ def _run_parallel(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     """Fan the per-PUB loop out across all available cores as Ray tasks, chunked.
 
     One task per chunk (not per PUB) so each task builds its estimator once and
-    amortises that setup over its circuits. Row order is preserved.
+    amortizes that setup over its circuits. Row order is preserved.
     """
     n_pubs = len(pubs)
 

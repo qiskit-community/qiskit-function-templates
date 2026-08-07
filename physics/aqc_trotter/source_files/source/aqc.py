@@ -12,8 +12,8 @@
 
 """Stage 2 — AQC compression (classical, in-process).
 
-Compresses the deep Trotter targets from stage 1 into a shallow parametrised
-ansatz by maximising MPS-fidelity (``qiskit-addon-aqc-tensor`` + quimb). This is
+Compresses the deep Trotter targets from stage 1 into a shallow parametrized
+ansatz by maximizing MPS-fidelity (``qiskit-addon-aqc-tensor`` + quimb). This is
 the memory-dominant stage of the function: its footprint grows sharply with
 ``AQCOptions.max_bond``.
 

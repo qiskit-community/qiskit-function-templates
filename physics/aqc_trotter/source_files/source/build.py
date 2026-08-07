@@ -12,11 +12,11 @@
 
 """Stage 1 — Build: classical spec -> circuits.
 
-Initial-state preparation, the nearest-neighbour Trotter targets fed to AQC in
+Initial-state preparation, the nearest-neighbor Trotter targets fed to AQC in
 stage 2, and the measured observables.
 
 Nothing here is model-specific: the time evolution comes from
-:meth:`HamiltonianSpec.build_evolution`, so any 1D nearest-neighbour Pauli
+:meth:`HamiltonianSpec.build_evolution`, so any 1D nearest-neighbor Pauli
 Hamiltonian flows through unchanged.
 """
 from __future__ import annotations
@@ -47,8 +47,8 @@ def prepare_initial_state(n: int, circuit: Optional[QuantumCircuit]) -> QuantumC
 
     Default ``|0...0>`` when ``circuit`` is ``None``; otherwise a prepared
     :class:`~qiskit.circuit.QuantumCircuit` passed in natively — this is how a
-    caller hands in a ground state it optimised itself (DMRG / VQE / …), and
-    Qiskit Serverless QPY-serialises it over the wire.
+    caller hands in a ground state it optimized itself (DMRG / VQE / …), and
+    Qiskit Serverless QPY-serializes it over the wire.
 
     The result is transpiled to :data:`_QUIMB_BASIS` so the AQC MPS builder
     accepts it (qubit order preserved — no coupling map).
@@ -123,14 +123,14 @@ def build_observables(n: int, observables=None) -> tuple[list[SparsePauliOp], li
     measured separately and becomes **one output column** (``None`` -> single-site
     ``Z`` on every qubit).
 
-    A single unit-coefficient Pauli is labelled by its string; anything else is
-    labelled ``obs_<i>``. Every observable must act on all ``n`` qubits.
+    A single unit-coefficient Pauli is labeled by its string; anything else is
+    labeled ``obs_<i>``. Every observable must act on all ``n`` qubits.
     """
     if observables is None:
         obs = [SparsePauliOp("I" * (n - 1 - i) + "Z" + "I" * i) for i in range(n)]
         return obs, [f"Z_{i}" for i in range(n)]
 
-    # Same parser EstimatorV2 uses; normalises every element to a {pauli: coeff} dict.
+    # Same parser EstimatorV2 uses; normalizes every element to a {pauli: coeff} dict.
     arr = ObservablesArray.coerce(observables)
     elements = arr.reshape((arr.size,)).tolist()  # flat list of {pauli: coeff} dicts
 

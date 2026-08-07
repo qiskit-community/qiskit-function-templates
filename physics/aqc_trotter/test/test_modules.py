@@ -98,7 +98,7 @@ class TestInitialState(unittest.TestCase):
 
     def test_initial_state_circuit_form(self):
         """A prepared circuit is preserved up to global phase; width is checked."""
-        # Native QuantumCircuit hand-off (what serverless QPY-deserialises on the worker).
+        # Native QuantumCircuit hand-off (what serverless QPY-deserializes on the worker).
         src = QuantumCircuit(3)
         src.h(0)
         src.cx(0, 1)
@@ -112,7 +112,7 @@ class TestInitialState(unittest.TestCase):
 
 
 class TestObservables(unittest.TestCase):
-    """Observable parsing and labelling."""
+    """Observable parsing and labeling."""
 
     def test_observables_default_per_site_z(self):
         """None -> single-site Z on every qubit."""

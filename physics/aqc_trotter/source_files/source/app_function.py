@@ -12,7 +12,7 @@
 
 """Application function: AQC-compressed Hamiltonian dynamics with mitigated readout.
 
-Experiment-agnostic. Classical inputs (a 1D nearest-neighbour Pauli Hamiltonian,
+Experiment-agnostic. Classical inputs (a 1D nearest-neighbor Pauli Hamiltonian,
 a prepared initial state, evolution steps, observables, options) -> classical
 output (the time series of each observable's expectation value). The
 Hamiltonian's ``num_qubits`` fixes the system size; there is no separate size
@@ -88,7 +88,7 @@ class AQCOptionsModel(_Base):
     fidelity_target: Optional[float] = Field(
         default=None, gt=0, le=1
     )  # our early-stop, not a scipy arg
-    # scipy.optimize.minimize kwargs for the fidelity optimisation; passed through as-is.
+    # scipy.optimize.minimize kwargs for the fidelity optimization; passed through as-is.
     optimizer_settings: dict = Field(default_factory=lambda: deepcopy(DEFAULT_OPTIMIZER_SETTINGS))
 
 
@@ -118,7 +118,7 @@ DEFAULT_TRANSPILER_OPTIONS: dict = {"optimization_level": 3}
 # PauliEvolutionGate synthesis config for the time evolution:
 #   {"method": "lie" | "suzuki", "synthesis_settings": {<method-specific kwargs>}}
 # ``method`` picks the (deterministic, <=2q) product formula; ``synthesis_settings`` is that
-# method's constructor kwargs (JSON-serialisable — order, cx_structure, insert_barriers, ...).
+# method's constructor kwargs (JSON-serializable — order, cx_structure, insert_barriers, ...).
 # ``reps`` is owned by the function (= Trotter step count) and rejected. Default 2nd-order Suzuki.
 DEFAULT_TROTTER_OPTIONS: dict = {"method": "suzuki", "synthesis_settings": {"order": 2}}
 
@@ -137,7 +137,7 @@ class InputModel(_Base):
     # must be <= t_steps; remaining steps run as plain Trotter. A single-ansatz run
     # is just one segment, e.g. [{"n_steps": 5, "ansatz_steps": 1}].
     aqc_segments: list[AQCSegment] = Field(min_length=1)
-    # 1-D nearest-neighbour Pauli Hamiltonian over the chain — required. Its
+    # 1-D nearest-neighbor Pauli Hamiltonian over the chain — required. Its
     # ``num_qubits`` fixes the system size; there is no separate ``n`` input.
     hamiltonian: SparsePauliOp
     initial_state: Optional[QuantumCircuit] = (
@@ -168,7 +168,7 @@ class InputModel(_Base):
     @model_validator(mode="after")
     def _check(self):
         if self.hamiltonian.num_qubits < 2:
-            raise ValueError("hamiltonian must act on >= 2 qubits (1-D nearest-neighbour chain).")
+            raise ValueError("hamiltonian must act on >= 2 qubits (1-D nearest-neighbor chain).")
         reserved = {"backend", "target"} & set(self.transpiler_options)
         if reserved:
             raise ValueError(
@@ -203,7 +203,7 @@ class InputModel(_Base):
         if self.aqc_options.fidelity_target is not None and "callback" in opt_settings:
             raise ValueError(
                 "aqc_options.optimizer_settings may not set 'callback' when fidelity_target "
-                "is set — fidelity_target's early-stop uses the optimiser's callback slot."
+                "is set — fidelity_target's early-stop uses the optimizer's callback slot."
             )
         total_aqc = sum(seg.n_steps for seg in self.aqc_segments)
         if total_aqc > self.t_steps:
@@ -248,14 +248,14 @@ class DynamicsFunction:
 
     # -- orchestration ----------------------------------------------------
     def run(self) -> dict:
-        """Run the full pipeline and return the serialisable result dictionary."""
+        """Run the full pipeline and return the serializable result dictionary."""
         cfg = self.cfg
 
         operator = cfg.hamiltonian
         n = operator.num_qubits  # system size is set by the Hamiltonian
         spec = make_spec("pauli_1d_nn", n, operator=operator, trotter_options=cfg.trotter_options)
 
-        # --- Stage 1+2: build + AQC compression (classical optimisation) ---
+        # --- Stage 1+2: build + AQC compression (classical optimization) ---
         t_opt0 = time.time()
         update_status(Job.OPTIMIZING_HARDWARE)
 
@@ -282,7 +282,7 @@ class DynamicsFunction:
 
         # --- Stage 3: execute -------------------------------------------
         # On runtime the status tracks the QPU job: WAITING_QPU while it sits in
-        # the queue, then EXECUTING_QPU once it starts running (both signalled
+        # the queue, then EXECUTING_QPU once it starts running (both signaled
         # from the execute stage). Local sim backends have no queue, so they mark
         # EXECUTING_QPU directly.
         t_exec0 = time.time()
@@ -373,7 +373,7 @@ class DynamicsFunction:
         for job in self._jobs:
             try:
                 job.cancel()
-            # Best-effort cleanup: a job that cannot be cancelled (already
+            # Best-effort cleanup: a job that cannot be canceled (already
             # finished, transport error, ...) must not mask the original failure.
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.error("Unable to cancel runtime job: %s", exc)

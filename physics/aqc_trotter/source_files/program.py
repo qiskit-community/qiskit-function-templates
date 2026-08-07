@@ -39,7 +39,7 @@ import tempfile
 # site-packages is read-only and there is no writable ~/.cache, so quimb's
 # cache=True njit functions (e.g. quimb.core.threading_choose_num_blocks) fail
 # with "cannot cache function: no locator available". Set before numba/quimb are
-# imported (both load lazily, after this line). Honour an explicit override.
+# imported (both load lazily, after this line). Honor an explicit override.
 os.environ.setdefault("NUMBA_CACHE_DIR", os.path.join(tempfile.gettempdir(), "numba_cache"))
 
 # pylint: disable=wrong-import-position
