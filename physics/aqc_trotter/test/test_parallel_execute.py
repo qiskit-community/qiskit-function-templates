@@ -16,7 +16,7 @@ Opt-in ``parallel_sim=True`` fans the per-time-step PUB loop across all availabl
 cores as Ray tasks (``execute._run_parallel``). For the exact ``statevector``
 path the parallel output must match the sequential output bit-for-bit — this
 guards that the fan-out is a pure refactor of *what* is computed, only *where*
-it runs. One test drives the full ``DynamicsFunction`` pipeline to confirm the
+it runs. One case drives the full ``DynamicsFunction`` pipeline to confirm the
 ``parallel_sim`` input is plumbed end-to-end.
 """
 
@@ -69,15 +69,26 @@ def _pubs(n, count):
 
 @unittest.skipUnless(HAS_RAY, "ray is required for the parallel execution path")
 class TestParallelExecute(unittest.TestCase):
-    """Ray fan-out must reproduce the sequential result exactly."""
+    """Ray fan-out must reproduce the sequential result exactly.
+
+    Every scenario shares one test method deliberately. ``stestr`` shards by test
+    id, so a method per scenario hands this class to several runner processes at
+    once, and each one's ``setUpClass`` starts its *own* head node — a bare
+    ``ray.init()`` never joins an existing local cluster. Three of those booting
+    together on a 3-core runner, alongside the AQC tests already saturating those
+    cores, overloads the GCS and node startup times out. One id means one
+    cluster; ``subTest`` keeps the scenarios reported separately.
+    """
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         # Start the cluster here rather than letting `_run_parallel` do it, so the
         # workers get a runtime environment that can import the function package.
+        # The dashboard is startup cost for something no test ever reads.
         ray.init(
             ignore_reinit_error=True,
+            include_dashboard=False,
             runtime_env={"env_vars": {"PYTHONPATH": _WORKER_PYTHONPATH}},
         )
 
@@ -86,24 +97,41 @@ class TestParallelExecute(unittest.TestCase):
         ray.shutdown()
         super().tearDownClass()
 
-    def test_parallel_matches_sequential_many_circuits(self):
-        """count > cores -> multi-circuit chunks (exercises intra-chunk ordering)."""
-        n, count = 5, 20
-        pubs = _pubs(n, count)
-        seq = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=False))
-        par = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=True))
-        self.assertEqual(seq.shape, (count, n))
-        self.assertEqual(par.shape, (count, n))
-        # exact: statevector is deterministic
-        np.testing.assert_array_equal(par, seq)
+    def test_parallel_matches_sequential(self):
+        """Fan-out changes only where the PUBs run, never what they evaluate to."""
+        # count > cores exercises multi-circuit chunks (and intra-chunk ordering);
+        # count < cores caps the chunks at n_pubs (one circuit each, no empties).
+        for case, n, count in (("many circuits", 5, 20), ("few circuits", 4, 3)):
+            with self.subTest(case=case):
+                pubs = _pubs(n, count)
+                seq = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=False))
+                par = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=True))
+                self.assertEqual(seq.shape, (count, n))
+                self.assertEqual(par.shape, (count, n))
+                # exact: statevector is deterministic
+                np.testing.assert_array_equal(par, seq)
 
-    def test_parallel_matches_sequential_few_circuits(self):
-        """count < cores -> chunks are capped at n_pubs (one circuit each), no empties."""
-        n, count = 4, 3
-        pubs = _pubs(n, count)
-        seq = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=False))
-        par = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=True))
-        np.testing.assert_array_equal(par, seq)
+        with self.subTest(case="end to end"):
+            ham = SparsePauliOp.from_sparse_list(
+                [(p, [i, i + 1], 0.5) for i in range(3) for p in ("XX", "YY", "ZZ")], num_qubits=4
+            )
+            args = {
+                "t_steps": 3,
+                "aqc_segments": [{"n_steps": 1, "ansatz_steps": 1}],
+                "dt": 0.2,
+                "hamiltonian": ham,
+                "backend": "statevector",
+            }
+            seq = DynamicsFunction(**args, parallel_sim=False).run()
+            par = DynamicsFunction(**args, parallel_sim=True).run()
+            np.testing.assert_allclose(
+                np.array(par["expectation_values"]), np.array(seq["expectation_values"])
+            )
+
+
+@unittest.skipUnless(HAS_RAY, "ray is required for the parallel execution path")
+class TestParallelSimNotFannedOut(unittest.TestCase):
+    """`parallel_sim=True` requests that never reach Ray, so no cluster is needed."""
 
     def test_single_pub_not_fanned_out(self):
         """A single PUB is never parallelised, even with parallel_sim=True."""
@@ -111,21 +139,3 @@ class TestParallelExecute(unittest.TestCase):
         pubs = _pubs(n, 1)
         out = run_pubs(pubs, ExecutionOptions(backend="statevector", parallel_sim=True))
         self.assertEqual(out.shape, (1, n))
-
-    def test_end_to_end_parallel_input_matches_sequential(self):
-        """parallel_sim plumbed from the top-level input must match the sequential run."""
-        ham = SparsePauliOp.from_sparse_list(
-            [(p, [i, i + 1], 0.5) for i in range(3) for p in ("XX", "YY", "ZZ")], num_qubits=4
-        )
-        args = {
-            "t_steps": 3,
-            "aqc_segments": [{"n_steps": 1, "ansatz_steps": 1}],
-            "dt": 0.2,
-            "hamiltonian": ham,
-            "backend": "statevector",
-        }
-        seq = DynamicsFunction(**args, parallel_sim=False).run()
-        par = DynamicsFunction(**args, parallel_sim=True).run()
-        np.testing.assert_allclose(
-            np.array(par["expectation_values"]), np.array(seq["expectation_values"])
-        )
