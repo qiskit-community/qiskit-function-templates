@@ -1,0 +1,25 @@
+name: AQC+Trotter Hamiltonian Dynamics Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'physics/aqc_trotter/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+
+  pull_request:
+    branches: [main]
+    paths:
+      - 'physics/aqc_trotter/**'
+      - 'requirements-dev.txt'
+      - 'requirements-e2e.txt'
+      - 'tox.ini'
+
+jobs:
+  call-tests:
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      dir: physics/aqc_trotter
+      os-list: '["macOS-latest", "ubuntu-latest"]'
