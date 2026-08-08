@@ -33,6 +33,7 @@ Three backends, selected by :attr:`ExecutionOptions.backend`:
 from __future__ import annotations
 
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Optional
 
@@ -163,7 +164,12 @@ def _run_fake(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
 
 
 def _run_runtime(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
-    """Mitigated execution on real hardware, split across ``opts.batches`` jobs."""
+    """Mitigated execution on real hardware, split across ``opts.batches`` jobs.
+
+    More than one batch runs the jobs inside a single ``Batch``, so the group
+    takes one queue wait. The default of a single batch submits a plain runtime
+    job instead and creates no session.
+    """
     from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
     from qiskit_ibm_runtime import Batch, EstimatorV2 as Estimator
 
@@ -188,8 +194,16 @@ def _run_runtime(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     bounds = np.array_split(np.arange(n_pubs), batches)
 
     rows: list[Optional[np.ndarray]] = [None] * n_pubs
-    with Batch(backend=backend) as _batch:
-        estimator = Estimator(backend, options=opts.estimator_options)
+    # A ``Batch`` is a server-side session (one ``POST /sessions``). It pays for
+    # itself when several jobs can share a single queue wait, but for the
+    # single-job default it is pure overhead, and one more call that can fail
+    # before any circuit reaches the QPU. So batch only when there is more than
+    # one job, and use plain job mode otherwise.
+    batch_cm = Batch(backend=backend) if batches > 1 else nullcontext()
+    with batch_cm as batch:
+        # Pass the mode explicitly: the batch when batching, else the backend.
+        mode = batch if batch is not None else backend
+        estimator = Estimator(mode, options=opts.estimator_options)
 
         jobs = []
         for idx in bounds:
