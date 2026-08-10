@@ -223,8 +223,10 @@ def _run_runtime(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
         for idx, job in jobs:
             res = job.result()
             for local_i, global_i in enumerate(idx):
-                # hardware layout reverses site order vs little-endian observable list
-                rows[global_i] = np.asarray(res[local_i].data.evs, dtype=float)[::-1]
+                # ``evs`` comes back in the order of the observables list, which
+                # ``apply_layout`` has already remapped onto the transpiled qubits,
+                # so no site reordering belongs here (same as the fake path).
+                rows[global_i] = np.asarray(res[local_i].data.evs, dtype=float)
     return np.vstack(rows)
 
 
