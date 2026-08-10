@@ -286,8 +286,10 @@ class DynamicsFunction:
         # from the execute stage). Local sim backends have no queue, so they mark
         # EXECUTING_QPU directly.
         t_exec0 = time.time()
+        stage_at: dict[str, float] = {}  # when each exec sub-stage began
 
         def _on_exec_status(stage: str) -> None:
+            stage_at[stage] = time.time()
             update_status(Job.WAITING_QPU if stage == "waiting" else Job.EXECUTING_QPU)
 
         exec_opts = execute_stage.ExecutionOptions(
@@ -325,7 +327,24 @@ class DynamicsFunction:
                     "fidelities": {k: aqc_res.fidelities[k] for k in seg_steps},
                 }
             )
+        # Queue wait: from submission ("waiting") until the job leaves the queue
+        # ("executing"). Both hooks fire on runtime only; local sims never queue.
+        t_queue = max(0.0, stage_at.get("executing", 0.0) - stage_at.get("waiting", 0.0))
         qpu_key = "QPU_TIME" if cfg.backend == "runtime" else "CPU_TIME"
+        run_warnings = list(aqc_res.warnings)
+        if cfg.backend == "runtime":
+            # Charged QPU seconds from the jobs themselves. This stage's wall clock
+            # is not it: that also covers the transpile, the queue, and the fetch.
+            qpu_seconds = exec_opts.extra.get("qpu_usage_seconds")
+            if qpu_seconds is None:
+                qpu_seconds = max(0.0, (t_exec1 - t_exec0) - t_queue)
+                run_warnings.append(
+                    "Charged QPU time was unavailable from the runtime job(s); "
+                    "RUNNING: EXECUTING_QPU falls back to execute-stage wall clock "
+                    "excluding the queue wait."
+                )
+        else:
+            qpu_seconds = t_exec1 - t_exec0
         # Per-step depth/gate-count: full (uncompressed) Trotter vs the AQC+Trotter
         # circuit actually executed, so the caller can quantify the compression saving.
         circuit_stats_by_step = {
@@ -349,11 +368,11 @@ class DynamicsFunction:
                 "execution_backend": cfg.backend,
                 "aqc_fidelities": aqc_res.fidelities,  # flat, full-series (all compressed steps)
                 "circuit_stats": circuit_stats_by_step,
-                "warnings": aqc_res.warnings,  # e.g. cotengrust-fallback notice
+                "warnings": run_warnings,  # e.g. cotengrust-fallback notice
                 "resource_usage": {
                     "RUNNING: OPTIMIZING_FOR_HARDWARE": {"CPU_TIME": t_opt1 - t_opt0},
-                    "RUNNING: WAITING_FOR_QPU": {"CPU_TIME": 0.0},
-                    "RUNNING: EXECUTING_QPU": {qpu_key: t_exec1 - t_exec0},
+                    "RUNNING: WAITING_FOR_QPU": {"CPU_TIME": t_queue},
+                    "RUNNING: EXECUTING_QPU": {qpu_key: qpu_seconds},
                 },
             },
         }

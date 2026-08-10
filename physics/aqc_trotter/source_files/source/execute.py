@@ -73,6 +73,8 @@ class ExecutionOptions:
     # resilience / ...). An EstimatorOptions-shaped dict passed straight to
     # EstimatorV2(mode=..., options=...); {} keeps the estimator's own defaults.
     estimator_options: dict = field(default_factory=dict)
+    # Free-form channel back to the caller. The runtime path records the charged
+    # ``qpu_usage_seconds`` here once its jobs finish.
     extra: dict = field(default_factory=dict)
     # optional status hook (runtime path only): called with "waiting" once the
     # job is queued, then "executing" once it leaves the queue and starts running.
@@ -163,6 +165,24 @@ def _run_fake(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     return np.vstack(rows)
 
 
+def _charged_qpu_seconds(jobs: list) -> Optional[float]:
+    """Total charged QPU time over ``(idx, job)`` pairs, or None if withheld.
+
+    ``usage()`` reports 0 until the gateway settles the final figure, so fall back
+    to the running total. A metadata call that fails must not sink a finished run.
+    """
+    total = 0.0
+    for _, job in jobs:
+        try:
+            used = job.usage() or job.usage(partial=True)
+        except Exception:  # pylint: disable=broad-exception-caught  # pragma: no cover
+            used = None
+        if used is None:
+            return None
+        total += float(used)
+    return total
+
+
 def _run_runtime(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     """Mitigated execution on real hardware, split across ``opts.batches`` jobs.
 
@@ -227,6 +247,10 @@ def _run_runtime(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
                 # ``apply_layout`` has already remapped onto the transpiled qubits,
                 # so no site reordering belongs here (same as the fake path).
                 rows[global_i] = np.asarray(res[local_i].data.evs, dtype=float)
+
+        # Hand the charged QPU time back so the caller reports real usage rather
+        # than this stage's wall clock (transpile + queue + execution + fetch).
+        opts.extra["qpu_usage_seconds"] = _charged_qpu_seconds(jobs)
     return np.vstack(rows)
 
 
