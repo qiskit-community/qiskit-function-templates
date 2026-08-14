@@ -118,7 +118,7 @@ default. The Hamiltonian's `num_qubits` fixes the chain length.
 | `backend_name` | `str` or `null` | — | no | `least_busy()` | IBM backend name for `runtime` (or a named fake); `null` selects the least-busy device. |
 | `batches` | `int` | `>=1` | no | `1` | Split across N runtime jobs; `1` = one job holding every PUB (`runtime` backend only) |
 | `parallel_sim` | `bool` | `true` \| `false` | no | `false` | Fan the local-sim execution (`statevector`/`fake`) across all available cores via Ray — each time-step circuit runs as its own task. `false` (default) runs them sequentially. No effect on `runtime`. |
-| `return_circuits` | `bool` | `true` \| `false` | no | `false` | Return the logical AQC + Trotter circuits in the result alongside the observable series ([detail below](#aqc_segments)). |
+| `return_circuits` | `bool` | `true` \| `false` | no | `false` | Return the logical AQC + Trotter circuits in the result alongside the observable series ([detail below](#output)). |
 
 <a id="aqc_segments"></a>
 #### `aqc_segments`
@@ -156,11 +156,6 @@ Compressing every step is rarely worth it — the late steps are the expensive o
 and the cheapest to just run as Trotter. Check `metadata.circuit_stats`, which reports
 2-qubit depth and gate count for full Trotter versus the AQC circuit at every step, to
 confirm the compression is actually buying you depth.
-
-**Keeping the circuits.** Compression is the expensive part of a run, and the circuits it
-produces are discarded once the observables are measured. Set `return_circuits=True` and the
-result carries them under `circuits`, so you can inspect the compressed ansatz, run it
-elsewhere, or compare compression settings without paying for the fit again.
 
 <a id="hamiltonian"></a>
 #### `hamiltonian`
@@ -433,6 +428,10 @@ lifecycle. A rejected input fails fast as a structured `ServerlessError` (code `
 `aqc_fidelities` and `circuit_stats` are the two to read first: together they tell you
 whether the compression was faithful and whether it actually saved depth. See
 [`aqc_segments`](#aqc_segments) for how to act on them.
+
+The compressed circuits themselves are discarded once the observables are measured, and compression is
+the expensive part of a run. Set `return_circuits=True` to get the compressed circuits back under `circuits`, so
+you can inspect the compressed ansatz or reuse it without paying for the fit again.
 
 ## Execution backends
 
