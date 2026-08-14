@@ -164,6 +164,9 @@ class InputModel(_Base):
     estimator_options: dict = Field(default_factory=lambda: deepcopy(DEFAULT_ESTIMATOR_OPTIONS))
     # AQC compression tuning (MPS bond/cutoff, optimizer, fidelity_target); optional.
     aqc_options: AQCOptionsModel = Field(default_factory=AQCOptionsModel)
+    # Return the logical AQC + Trotter circuits alongside the observable series.
+    # Off by default so existing callers see no change in payload size.
+    return_circuits: bool = False
 
     @model_validator(mode="after")
     def _check(self):
@@ -376,6 +379,10 @@ class DynamicsFunction:
                 },
             },
         }
+        if cfg.return_circuits:
+            # The evolved circuits only, so entry i lines up with times[i + 1]
+            # and with the 1-indexed keys in metadata.aqc_fidelities.
+            result["circuits"] = evolved
         logger.info(
             "Done. %d observables x %d times; AQC fids=%s; aqc_compress=%.2fs execute=%.2fs",
             len(obs_labels),

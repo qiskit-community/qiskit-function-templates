@@ -329,6 +329,13 @@ class TestInputModel(unittest.TestCase):
         with self.assertRaises(ValidationError):
             InputModel(**self._args(transpiler_options={"target": "x"}))
 
+    def test_return_circuits_defaults_off_and_validates(self):
+        """`return_circuits` is an opt-in bool, off unless the caller asks for it."""
+        self.assertFalse(InputModel(**self._args()).return_circuits)
+        self.assertTrue(InputModel(**self._args(return_circuits=True)).return_circuits)
+        with self.assertRaises(ValidationError):
+            InputModel(**self._args(return_circuits="yes please"))
+
     def test_trotter_options_method_and_reserved(self):
         """`method` selects the product formula; its kwargs live in synthesis_settings."""
         cfg = InputModel(
