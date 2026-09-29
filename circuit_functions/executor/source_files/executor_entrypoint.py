@@ -458,7 +458,7 @@ def run_function(
 
     isa_pubs = _isa_sampler_pubs(sampler_pubs, backend, optimization_level)
     program, executor_options = prepare_sampler_program(
-        isa_pubs, _to_sampler_options(execution_options), default_shots=shots
+        isa_pubs, _to_sampler_options(execution_options), default_shots=shots, backend=backend
     )
 
     end_optimizing = time.time()
