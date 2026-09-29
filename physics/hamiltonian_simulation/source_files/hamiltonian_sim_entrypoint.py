@@ -17,6 +17,7 @@ Hamiltonian Simulation Function Template source code.
 import os
 import datetime
 import json
+import tempfile
 import time
 import traceback
 import numpy as np
@@ -53,8 +54,6 @@ from qiskit_serverless import (
 # imports. On the Fleets runner the container filesystem is read-only except for
 # a few mounts, so the Ray runner's /data path is not writable; use the
 # job-scoped /job_user_data mount when present, else a temp dir for local runs.
-import tempfile  # pylint: disable=wrong-import-position
-
 _numba_cache = "/job_user_data" if os.path.isdir("/job_user_data") else tempfile.gettempdir()
 os.environ["NUMBA_CACHE_DIR"] = os.path.join(_numba_cache, "numba_cache")
 import quimb.tensor  # pylint: disable=wrong-import-position
