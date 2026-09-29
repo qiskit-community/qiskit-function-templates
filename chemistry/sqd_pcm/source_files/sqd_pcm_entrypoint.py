@@ -14,19 +14,27 @@
 SQD-PCM Function Template source code.
 """
 
+# pylint: disable=wrong-import-position
+# The thread-env setup below must run before numpy/pyscf are imported (they read
+# these vars at load time), so the imports that follow it are intentionally not
+# at the very top of the module.
 import os
 
-# Default BLAS/OpenMP to 1 thread before numpy/pyscf import (they read these at
-# load time). Prevents N-workers x N-threads oversubscription; overridden per
-# worker below from blas_threads_per_worker.
-for _thread_var in (
-    "OMP_NUM_THREADS",
-    "OPENBLAS_NUM_THREADS",
-    "MKL_NUM_THREADS",
-    "NUMEXPR_NUM_THREADS",
-    "VECLIB_MAXIMUM_THREADS",
-):
-    os.environ.setdefault(_thread_var, "1")
+
+def _default_blas_threads() -> None:
+    """Default BLAS/OpenMP to 1 thread before numpy/pyscf import. Prevents
+    N-workers x N-threads oversubscription; overridden per worker later."""
+    for var in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+    ):
+        os.environ.setdefault(var, "1")
+
+
+_default_blas_threads()
 
 from pathlib import Path
 from typing import Any
@@ -70,7 +78,9 @@ from qiskit_serverless import (
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
-from solve_solvent import solve_solvent  # pylint: disable=wrong-import-position
+from solve_solvent import solve_solvent
+
+# pylint: enable=wrong-import-position
 
 logger = get_logger()
 

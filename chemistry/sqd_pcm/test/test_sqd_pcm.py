@@ -55,7 +55,10 @@ class TestSQDPCM(unittest.TestCase):
             files_name=self.datafiles_name,
             count_dict_file_name=self.count_dict_name,
         )
-        # Review testing tolerance (high because of result variability)
-        self.assertTrue(out["sci_solver_total_duration"] < 10)
+        # Loose upper bound: this duration now includes ProcessPoolExecutor
+        # startup, and under the "spawn" start method each worker cold-imports
+        # PySCF, which dominates the runtime of this tiny (4-dim) problem. The
+        # bound only guards against a hang/runaway, not solver speed.
+        self.assertTrue(out["sci_solver_total_duration"] < 60)
         self.assertTrue(out["lowest_energy_value"] < -72)
         self.assertTrue(out["metadata"]["num_iterations_executed"] == 2)
