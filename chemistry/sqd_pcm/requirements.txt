@@ -1,11 +1,16 @@
-# qiskit ecosystem (implicit qiskit dependency)
-qiskit_addon_sqd~=0.11.0
-qiskit-serverless[ray]
+# Versions pinned to match the Fleets runtime image
+# (qiskit-serverless/docker-images/requirements-dynamic-dependencies.txt), so
+# local development and testing run against the same stack that executes the
+# function on Fleets. Update these together with that file.
+
+# qiskit ecosystem
+qiskit_addon_sqd==0.13.1
+qiskit-serverless>=0.36.0  # Fleets runner; no [ray] extra — the Fleets image ships no Ray
 qiskit-ibm-runtime
 
 # external packages
-ffsim~=0.0.54
-pyscf~=2.9.0
+ffsim==0.0.70
+pyscf==2.13.1
 
 # dev
-qiskit-aer
+qiskit-aer==0.17.2
