@@ -13,10 +13,26 @@
 """
 SQD-PCM Function Template source code.
 """
+
+import os
+
+# Default BLAS/OpenMP to 1 thread before numpy/pyscf import (they read these at
+# load time). Prevents N-workers x N-threads oversubscription; overridden per
+# worker below from blas_threads_per_worker.
+for _thread_var in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ.setdefault(_thread_var, "1")
+
 from pathlib import Path
 from typing import Any
 from datetime import datetime
-import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 import sys
 import json
 import time
@@ -37,14 +53,15 @@ from qiskit.primitives import BackendSamplerV2
 from qiskit_addon_sqd.counts import counts_to_arrays
 from qiskit_addon_sqd.configuration_recovery import recover_configurations
 from qiskit_addon_sqd.fermion import bitstring_matrix_to_ci_strs
-from qiskit_addon_sqd.subsampling import postselect_and_subsample
+from qiskit_addon_sqd.subsampling import (
+    postselect_by_hamming_right_and_left,
+    subsample,
+)
 
 from qiskit_ibm_runtime import SamplerV2
 from qiskit_serverless import (
     get_arguments,
     save_result,
-    distribute_task,
-    get,
     update_status,
     Job,
     get_runtime_service,
@@ -56,6 +73,37 @@ sys.path.insert(0, current_dir)
 from solve_solvent import solve_solvent  # pylint: disable=wrong-import-position
 
 logger = get_logger()
+
+
+def _worker_warmup(_):
+    """No-op submitted once per worker to force (and time) spawn + PySCF import,
+    so the breakdown separates worker startup from solve time."""
+    return os.getpid()
+
+
+def _solve_solvent_worker(args):
+    """Run one ``solve_solvent`` batch in a worker process. Module-scope (not a
+    closure) so ProcessPoolExecutor can pickle it; takes one positional tuple."""
+    (
+        batch,
+        myeps,
+        mysolvmethod,
+        myavas,
+        num_orbitals,
+        spin_sq,
+        max_davidson,
+        checkpoint_file,
+    ) = args
+    return solve_solvent(  # sqd for pyscf
+        batch,
+        myeps,
+        mysolvmethod,
+        myavas,
+        num_orbitals,
+        spin_sq=spin_sq,
+        max_davidson=max_davidson,
+        checkpoint_file=checkpoint_file,
+    )
 
 
 def run_function(
@@ -121,8 +169,14 @@ def run_function(
             - "files_name" (str): optional name for output files (enabled for local testing)
             - "testing_backend" (FakeBackendV2): optional fake backend instance to bypass
                 qiskit runtime service instantiation (enabled for local testing)
-            - "count_dict_file_name" (str): path to a count dict file to bypass primitive
-                execution and jump directly to SQD section (enabled for local testing)
+            - "count_dict_file_name" (str): filename for a "generate once, then reuse"
+                LUCJ counts cache. A relative name is resolved against the entrypoint's
+                directory, which on the Fleets runner is the function-scoped, writable
+                `/function_user_data/` mount (shared across all jobs of this function).
+                If the file exists, its counts are read and the QPU is skipped; if it
+                does not, the QPU is sampled and the counts are written there for
+                subsequent runs to reuse. An absolute path to an existing file is used
+                as-is (read-only), which is how the local unit test supplies fixed counts.
 
     Returns:
         The function should return the execution results as a dictionary with string keys.
@@ -164,13 +218,19 @@ def run_function(
     n_batches = sqd_options["number_of_batches"]
     samples_per_batch = sqd_options["samples_per_batch"]
     max_davidson_cycles = sqd_options["max_davidson_cycles"]
+    # BLAS threads per worker; None = auto (from cores/workers, below).
+    blas_threads_per_worker = sqd_options.get("blas_threads_per_worker", None)
 
     # kwarg parsing (local testing)
     testing_backend = kwargs.get("testing_backend", None)
     count_dict_file_name = kwargs.get("count_dict_file_name", None)
 
     files_name = kwargs.get("files_name", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-    output_path = Path.cwd() / "output_sqd_pcm"
+    # Fleets mounts only a few writable dirs. /job_user_data is the writable,
+    # job-scoped mount for these scratch files; fall back to cwd for local runs.
+    job_data_dir = Path("/job_user_data")
+    base_dir = job_data_dir if job_data_dir.is_dir() else Path.cwd()
+    output_path = base_dir / "output_sqd_pcm"
     output_path.mkdir(exist_ok=True)
     datafiles_name = str(output_path) + "/" + files_name
 
@@ -345,10 +405,27 @@ def run_function(
 
     # --
     # Step 3: Execute on Hardware
-    # Submit the underlying Sampler job. Note that this is not the
-    # actual function job.
-    if count_dict_file_name is None:
-        # Submit the LUCJ job
+    #
+    # count_dict_file_name is a "generate once, reuse" counts cache: if the file
+    # exists, read it and skip the QPU; otherwise sample on the QPU and write it.
+    # A relative name resolves to /function_user_data (function-scoped + writable),
+    # so the first run's file is seen by later runs; an absolute path is used as-is
+    # (local test). Unset means always sample.
+    if count_dict_file_name is not None:
+        counts_path = count_dict_file_name
+        if not os.path.isabs(counts_path):
+            counts_path = os.path.join(current_dir, counts_path)
+
+    if count_dict_file_name is not None and os.path.exists(counts_path):
+        # Reuse path: counts already cached from an earlier run. Skip the QPU.
+        logger.info(f"Skipping sampler, loading counts dict from file: {counts_path}")
+        with open(counts_path, "r") as file:
+            count_dict_string = file.read().replace("\n", "")
+        counts_dict = json.loads(count_dict_string.replace("'", '"'))
+        waiting_qpu_time = 0
+        executing_qpu_time = 0
+    else:
+        # Sampling path: no cached file (or caching disabled). Submit the LUCJ job.
         logger.info("Submitting sampler job")
         job = sampler.run([transpiled])
         logger.info(f"Job ID: {job.job_id()}")
@@ -371,14 +448,17 @@ def run_function(
 
         waiting_qpu_time = end_waiting_qpu - start_waiting_qpu
         executing_qpu_time = end_executing_qpu - end_waiting_qpu
-    else:
-        # read LUCJ samples from count_dict
-        logger.info("Skipping sampler, loading counts dict from file")
-        with open(count_dict_file_name, "r") as file:
-            count_dict_string = file.read().replace("\n", "")
-        counts_dict = json.loads(count_dict_string.replace("'", '"'))
-        waiting_qpu_time = 0
-        executing_qpu_time = 0
+
+        # Cache the sampled counts for later runs (dict repr, matching the reuse
+        # branch's parser). A write failure is non-fatal: counts are already known.
+        if count_dict_file_name is not None:
+            try:
+                serializable = {str(k): int(v) for k, v in counts_dict.items()}
+                with open(counts_path, "w") as file:
+                    file.write(repr(serializable))
+                logger.info(f"Wrote {len(serializable)} bitstrings to counts cache: {counts_path}")
+            except OSError as exc:
+                logger.warning(f"Could not write counts cache to {counts_path}: {exc}")
 
     # --
     # Step 4: Post-process
@@ -400,30 +480,53 @@ def run_function(
     # Convert counts into bitstring and probability arrays
     bitstring_matrix_full, probs_arr_full = counts_to_arrays(counts_dict)
 
-    # We set qiskit_serverless to explicitly reserve 1 cpu per thread, as
-    # the task is CPU-bound and might degrade in performance when sharing
-    # a core at scale (this might not be the case with smaller examples)
-    @distribute_task(target={"cpu": 1})
-    def solve_solvent_parallel(
-        batches,
-        myeps,
-        mysolvmethod,
-        myavas,
-        num_orbitals,
-        spin_sq,
-        max_davidson,
-        checkpoint_file,
+    # Independent, CPU-bound per-batch eigensolvers, run one-per-process across the
+    # profile's cores (replaces the Ray @distribute_task/get fan-out, which Fleets
+    # cannot use). Size from sched_getaffinity (the cgroup quota), not cpu_count
+    # (the whole node); fall back to cpu_count off Linux.
+    try:
+        available_cpus = len(os.sched_getaffinity(0))
+    except AttributeError:
+        available_cpus = os.cpu_count() or 1
+    max_workers = min(n_batches, available_cpus)
+
+    # Threads per worker, set in the env before the (spawned) workers import numpy.
+    # Auto: ~2 threads per worker's core share (mild oversubscription, since the
+    # solve is only partly BLAS-bound), capped near 2x cores.
+    if blas_threads_per_worker is not None:
+        threads_per_worker = max(1, int(blas_threads_per_worker))
+    else:
+        threads_per_worker = max(1, (2 * available_cpus) // max_workers)
+    for _tv in (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
     ):
-        return solve_solvent(  # sqd for pyscf
-            batches,
-            myeps,
-            mysolvmethod,
-            myavas,
-            num_orbitals,
-            spin_sq=spin_sq,
-            max_davidson=max_davidson,
-            checkpoint_file=checkpoint_file,
-        )
+        os.environ[_tv] = str(threads_per_worker)
+    logger.info(
+        f"Worker BLAS threads: {threads_per_worker} "
+        f"(available_cpus={available_cpus}, max_workers={max_workers})"
+    )
+
+    # Start workers with "spawn", not the Linux default "fork". By this point the
+    # parent has imported PySCF and initialized OpenBLAS/OpenMP (and the openmpi
+    # library the fleet image loads). Forking a process that already holds native
+    # thread-pool / MPI locks gives the child an inherited-but-orphaned lock, and
+    # the worker's first BLAS/MPI call can then deadlock forever with no traceback
+    # -- which presents exactly as a silent hang after the batches are dispatched.
+    # A spawned worker starts a fresh interpreter that imports those libraries
+    # cleanly, at the cost of re-importing per worker (acceptable next to a
+    # multi-second solve). forkserver is used if spawn is somehow unavailable.
+    try:
+        mp_context = mp.get_context("spawn")
+    except ValueError:
+        mp_context = mp.get_context("forkserver")
+    logger.info(
+        f"Running {n_batches} batches across {max_workers} worker processes "
+        f"(start method: {mp_context.get_start_method()})"
+    )
 
     e_hist = np.zeros((iterations, n_batches))  # energy history
     s_hist = np.zeros((iterations, n_batches))  # spin history
@@ -431,84 +534,139 @@ def run_function(
     occupancy_hist = []
     avg_occupancy = None
 
+    # Create the pool ONCE and reuse it across all S-CORE iterations. Since spawn
+    # cold-imports PySCF per worker, a per-iteration pool would re-pay that import
+    # `iterations` times; one warm pool pays it once.
     num_ran_iter = 0
-    for i in range(iterations):
-        logger.info(f"Starting configuration recovery iteration {i}")
-        # On the first iteration, we have no orbital occupancy information from the
-        # solver, so we begin with the full set of noisy configurations.
-        if avg_occupancy is None:
-            bs_mat_tmp = bitstring_matrix_full
-            probs_arr_tmp = probs_arr_full
+    # Split post-processing time into worker startup / serial prep / parallel solve
+    # (surfaced in the result metadata) rather than one opaque number.
+    warmup_time = 0.0
+    prep_time_total = 0.0
+    solve_time_total = 0.0
 
-        # If we have average orbital occupancy information, we use it to refine the full
-        # set of noisy configurations
-        else:
-            bs_mat_tmp, probs_arr_tmp = recover_configurations(
-                bitstring_matrix_full, probs_arr_full, avg_occupancy, num_elec_a, num_elec_b
-            )
+    with ProcessPoolExecutor(max_workers=max_workers, mp_context=mp_context) as executor:
+        # Force every worker to start (and cold-import PySCF under spawn) up front,
+        # and time it, so the startup cost is measured once here instead of hiding
+        # inside the first iteration's solve time.
+        start_warmup = time.time()
+        list(executor.map(_worker_warmup, range(max_workers)))
+        warmup_time = time.time() - start_warmup
+        logger.info(f"Worker pool warmup ({max_workers} workers): {warmup_time:.1f} s")
 
-        # Create batches of subsamples. We post-select here to remove configurations
-        # with incorrect hamming weight during iteration 0, since no config recovery was performed.
-        batches = postselect_and_subsample(
-            bs_mat_tmp,
-            probs_arr_tmp,
-            hamming_right=num_elec_a,
-            hamming_left=num_elec_b,
-            samples_per_batch=samples_per_batch,
-            num_batches=n_batches,
-        )
+        for i in range(iterations):
+            iter_start = time.time()
+            logger.info(f"Starting configuration recovery iteration {i}")
+            # On the first iteration, we have no orbital occupancy information from the
+            # solver, so we begin with the full set of noisy configurations.
+            if avg_occupancy is None:
+                bs_mat_tmp = bitstring_matrix_full
+                probs_arr_tmp = probs_arr_full
 
-        # Run eigenstate solvers in a loop. This loop should be parallelized for larger problems.
-        e_tmp = np.zeros(n_batches)
-        s_tmp = np.zeros(n_batches)
-        g_solvs_tmp = np.zeros(n_batches)
-        occs_tmp = []
-        coeffs = []
-
-        res1 = []
-        for j in range(n_batches):
-            strs_a, strs_b = bitstring_matrix_to_ci_strs(batches[j])
-            logger.info(f"Batch {j} subspace dimension: {len(strs_a) * len(strs_b)}")
-
-            res1.append(
-                solve_solvent_parallel(
-                    batches[j],
-                    myeps,
-                    mymethod,
-                    myavas,
-                    num_orbitals,
-                    spin_sq=spin_sq,
-                    max_davidson=max_davidson_cycles,
-                    checkpoint_file=checkpoint_file_name,
+            # If we have average orbital occupancy information, we use it to refine the full
+            # set of noisy configurations
+            else:
+                bs_mat_tmp, probs_arr_tmp = recover_configurations(
+                    bitstring_matrix_full, probs_arr_full, avg_occupancy, num_elec_a, num_elec_b
                 )
+
+            # Post-select to remove configurations with incorrect hamming weight
+            # (important on iteration 0, where no config recovery was performed yet),
+            # then draw the batches of subsamples from what survives.
+            #
+            # This replaces the single ``postselect_and_subsample`` call, deprecated
+            # in qiskit-addon-sqd 0.12.0, with its two successor functions:
+            # ``postselect_by_hamming_right_and_left`` (returns the filtered matrix
+            # and renormalized probabilities) feeding ``subsample``.
+            bs_mat_ps, probs_arr_ps = postselect_by_hamming_right_and_left(
+                bs_mat_tmp,
+                probs_arr_tmp,
+                hamming_right=num_elec_a,
+                hamming_left=num_elec_b,
+            )
+            batches = subsample(
+                bs_mat_ps,
+                probs_arr_ps,
+                samples_per_batch=samples_per_batch,
+                num_batches=n_batches,
             )
 
-        res = get(res1)
+            # Run the per-batch eigenstate solvers in parallel across worker processes.
+            e_tmp = np.zeros(n_batches)
+            s_tmp = np.zeros(n_batches)
+            g_solvs_tmp = np.zeros(n_batches)
+            occs_tmp = []
+            coeffs = []
 
-        for j in range(n_batches):
-            energy_sci, coeffs_sci, avg_occs, spin, g_solv = res[j]
-            e_tmp[j] = energy_sci
-            s_tmp[j] = spin
-            g_solvs_tmp[j] = g_solv
-            occs_tmp.append(avg_occs)
-            coeffs.append(coeffs_sci)
+            for j in range(n_batches):
+                strs_a, strs_b = bitstring_matrix_to_ci_strs(batches[j])
+                logger.info(f"Batch {j} subspace dimension: {len(strs_a) * len(strs_b)}")
 
-        # Combine batch results
-        avg_occupancy = tuple(np.mean(occs_tmp, axis=0))
+            # Everything above in this iteration (config recovery + postselect +
+            # subsample) is serial prep that does not scale with cores; time it
+            # separately from the parallel solve below.
+            prep_time = time.time() - iter_start
+            prep_time_total += prep_time
+            start_solve = time.time()
 
-        # Track optimization history
-        e_hist[i, :] = e_tmp
-        s_hist[i, :] = s_tmp
-        g_solv_hist[i, :] = g_solvs_tmp
-        occupancy_hist.append(avg_occupancy)
+            # Submit all batches and collect via as_completed (not executor.map) so
+            # each batch logs as it finishes (progress vs. hang is visible) and a dead
+            # worker raises via future.result() instead of hanging. res[j] is filled by
+            # index to keep batch order, as Ray's get did.
+            res = [None] * n_batches
+            future_to_idx = {
+                executor.submit(
+                    _solve_solvent_worker,
+                    (
+                        batches[j],
+                        myeps,
+                        mymethod,
+                        myavas,
+                        num_orbitals,
+                        spin_sq,
+                        max_davidson_cycles,
+                        checkpoint_file_name,
+                    ),
+                ): j
+                for j in range(n_batches)
+            }
+            n_done = 0
+            for future in as_completed(future_to_idx):
+                j = future_to_idx[future]
+                res[j] = future.result()  # re-raises any worker exception here
+                n_done += 1
+                logger.info(f"Batch {j} solved ({n_done}/{n_batches} complete)")
 
-        lowest_e_batch_index = np.argmin(e_hist[i, :])
+            solve_time = time.time() - start_solve
+            solve_time_total += solve_time
+            logger.info(
+                f"Iteration {i} timing: prep {prep_time:.1f} s, "
+                f"parallel solve {solve_time:.1f} s"
+            )
 
-        logger.info(f"Lowest energy batch: {lowest_e_batch_index}")
-        logger.info(f"Lowest energy value: {np.min(e_hist[i, :])}")
-        logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
-        logger.info("-----------------------------------")
-        num_ran_iter += 1
+            for j in range(n_batches):
+                energy_sci, coeffs_sci, avg_occs, spin, g_solv = res[j]
+                e_tmp[j] = energy_sci
+                s_tmp[j] = spin
+                g_solvs_tmp[j] = g_solv
+                occs_tmp.append(avg_occs)
+                coeffs.append(coeffs_sci)
+
+            # Combine batch results
+            avg_occupancy = tuple(np.mean(occs_tmp, axis=0))
+
+            # Track optimization history
+            e_hist[i, :] = e_tmp
+            s_hist[i, :] = s_tmp
+            g_solv_hist[i, :] = g_solvs_tmp
+            occupancy_hist.append(avg_occupancy)
+
+            lowest_e_batch_index = np.argmin(e_hist[i, :])
+
+            logger.info(f"Lowest energy batch: {lowest_e_batch_index}")
+            logger.info(f"Lowest energy value: {np.min(e_hist[i, :])}")
+            logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
+            logger.info("-----------------------------------")
+            num_ran_iter += 1
 
     end_pp = time.time()
     end = time.time()
@@ -532,6 +690,21 @@ def run_function(
             "RUNNING: POST_PROCESSING": {
                 "CPU_TIME": end_pp - start_pp,
             },
+        },
+        # Breakdown of the post-processing stage so the wall-clock can be
+        # attributed to worker startup vs. serial prep (config recovery +
+        # subsampling, which does not scale with cores) vs. the parallel solve.
+        # Useful when comparing the process-pool runtime against the Ray baseline
+        # or across compute profiles: solve_wall_time is the part a bigger profile
+        # actually reduces.
+        "post_processing_breakdown": {
+            "worker_warmup_time": warmup_time,
+            "serial_prep_time": prep_time_total,
+            "parallel_solve_time": solve_time_total,
+            "max_workers": max_workers,
+            "available_cpus": available_cpus,
+            "blas_threads_per_worker": threads_per_worker,
+            "start_method": mp_context.get_start_method(),
         },
         "num_iterations_executed": num_ran_iter,
     }

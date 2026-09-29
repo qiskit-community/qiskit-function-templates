@@ -13,10 +13,9 @@
 """
 SQD PCM Function Template unit tests.
 """
+
 import unittest
 from pathlib import Path
-
-import ray
 
 from qiskit_ibm_runtime.fake_provider import FakeHanoiV2
 
@@ -32,10 +31,10 @@ class TestSQDPCM(unittest.TestCase):
     def setUp(self):
         super().setUp()
 
-        # mimick ray setup in serverless cluster
+        # The entrypoint no longer depends on Ray: on the Fleets runner it fans
+        # the batches out across a local ProcessPoolExecutor, so the test can call
+        # run_function directly without initializing a Ray cluster.
         cwd = Path.cwd()
-        ray.init(runtime_env={"working_dir": cwd / "chemistry/sqd_pcm/source_files"})
-
         self.count_dict_name = cwd / "chemistry/sqd_pcm/test/data/water_mini_count_dict.txt"
         self.backend_name = None
         self.datafiles_name = test_molecule.FILE_NAME

@@ -304,6 +304,15 @@ def solve_solvent(
         myci = fci.addons.fix_spin_(myci, ss=spin_sq)
     mc.fcisolver = myci
     mc.verbose = verbose_ci
+    # Propagate the requested verbosity to the SelectedCI solver itself. Without
+    # this it keeps PySCF's default level (NOTE), and its dump_flags() prints a
+    # multi-line "inefficient dialect of Selected CI ... use Dice" banner via
+    # logger.warn on every solve -- which, with one solver per batch per
+    # iteration, floods the job logs. That message is advisory (SQD deliberately
+    # uses this fixed-subspace solver), not an error, so we honor verbose_ci here
+    # and it stays silent at the default verbose=0 while still being recoverable
+    # by raising the verbosity.
+    myci.verbose = verbose_ci
     #########################################################################################
 
     # Initiate the "CASCI.with_solvent" simulation with SQD-compatible based CASCI kernel.
