@@ -47,7 +47,7 @@ from qiskit_ibm_runtime import Executor
 from qiskit_ibm_runtime.exceptions import IBMInputValueError
 from qiskit_ibm_runtime.executor_sampler.sampler import prepare as prepare_sampler_program
 from qiskit_ibm_runtime.executor_sampler.utils import extract_shots_from_pubs
-from qiskit_ibm_runtime.options_models.sampler_options import SamplerOptions
+from qiskit_ibm_runtime.options.sampler_options import SamplerOptions
 
 from options import Options, DEFAULT_MITIGATION_LEVEL, DEFAULT_OPTIMIZATION_LEVEL
 from options.utils import merge_options
@@ -458,7 +458,7 @@ def run_function(
 
     isa_pubs = _isa_sampler_pubs(sampler_pubs, backend, optimization_level)
     program, executor_options = prepare_sampler_program(
-        isa_pubs, _to_sampler_options(execution_options), default_shots=shots
+        isa_pubs, _to_sampler_options(execution_options), default_shots=shots, backend=backend
     )
 
     end_optimizing = time.time()
