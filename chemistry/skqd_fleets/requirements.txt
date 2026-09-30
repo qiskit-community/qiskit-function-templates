@@ -1,0 +1,12 @@
+# qiskit ecosystem (implicit qiskit dependency)
+qiskit-fermions~=0.2
+qiskit_addon_sqd~=0.13
+qiskit-serverless[ray]
+qiskit-ibm-runtime
+
+# external packages
+ffsim~=0.0.70
+pyscf~=2.9
+
+# dev
+qiskit-aer
