@@ -13,10 +13,9 @@
 """
 SQD PCM Function Template unit tests.
 """
+
 import unittest
 from pathlib import Path
-
-import ray
 
 from qiskit_ibm_runtime.fake_provider import FakeHanoiV2
 
@@ -32,10 +31,10 @@ class TestSQDPCM(unittest.TestCase):
     def setUp(self):
         super().setUp()
 
-        # mimick ray setup in serverless cluster
+        # The entrypoint no longer depends on Ray: on the Fleets runner it fans
+        # the batches out across a local ProcessPoolExecutor, so the test can call
+        # run_function directly without initializing a Ray cluster.
         cwd = Path.cwd()
-        ray.init(runtime_env={"working_dir": cwd / "chemistry/sqd_pcm/source_files"})
-
         self.count_dict_name = cwd / "chemistry/sqd_pcm/test/data/water_mini_count_dict.txt"
         self.backend_name = None
         self.datafiles_name = test_molecule.FILE_NAME
@@ -56,7 +55,10 @@ class TestSQDPCM(unittest.TestCase):
             files_name=self.datafiles_name,
             count_dict_file_name=self.count_dict_name,
         )
-        # Review testing tolerance (high because of result variability)
-        self.assertTrue(out["sci_solver_total_duration"] < 10)
+        # Loose upper bound: this duration now includes ProcessPoolExecutor
+        # startup, and under the "spawn" start method each worker cold-imports
+        # PySCF, which dominates the runtime of this tiny (4-dim) problem. The
+        # bound only guards against a hang/runaway, not solver speed.
+        self.assertTrue(out["sci_solver_total_duration"] < 60)
         self.assertTrue(out["lowest_energy_value"] < -72)
         self.assertTrue(out["metadata"]["num_iterations_executed"] == 2)
