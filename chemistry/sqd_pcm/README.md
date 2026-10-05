@@ -63,7 +63,7 @@ The [`compute_profile_benchmark.ipynb`](https://github.com/qiskit-community/qisk
 
 The notebook reports the post-processing time per profile, the speedup relative to the smallest profile, and a stacked-bar chart that separates the **parallel solve** (the per-batch diagonalizations, which shrink as the profile grows) from the **serial prep** (config recovery and subsampling between S-CORE iterations — the roughly constant Amdahl floor that no profile removes). It also surfaces `blas_threads_per_worker`, which trades per-solve speed against how many batches run at once and can be swept to find the optimum for a given profile.
 
-Key takeaways documented in the notebook: the speedup is **sub-linear** and floored by the serial prep stage; provisioning **more cores than batches** buys nothing on the concurrency axis (extra cores go to more threads per worker instead); and memory scales with concurrency rather than speed. For cross-runtime comparisons, note that the Fleets image pins newer `qiskit-addon-sqd` and `pyscf` versions than the older Ray stack, so part of any runtime difference can be the solver version rather than the runtime itself.
+Key takeaways documented in the notebook: the speedup is **sub-linear** and floored by the serial prep stage; provisioning **more cores than batches** buys nothing on the concurrency axis (extra cores go to more threads per worker instead); and memory scales with concurrency rather than speed. 
 
 ### Dependencies
 
