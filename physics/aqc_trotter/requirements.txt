@@ -6,8 +6,9 @@
 # transitively (numpy, scipy, pydantic, quimb, qiskit-quimb, jax/jaxlib, cotengra).
 
 qiskit~=2.5.0
-# The [ray] extra is the fan-out substrate for `parallel_sim` (source/execute.py).
-qiskit-serverless[ray]
+# parallel_sim (source/execute.py) fans out over a stdlib ProcessPoolExecutor,
+# so the [ray] extra is no longer needed (the Fleets image ships no Ray).
+qiskit-serverless
 # fake-backend + runtime estimator paths (source/execute.py)
 qiskit-ibm-runtime
 
