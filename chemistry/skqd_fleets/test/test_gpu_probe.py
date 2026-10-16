@@ -78,6 +78,7 @@ class TestGpuCheck(unittest.TestCase):
     """gpu_check never raises and reports a CPU-only worker as device_count 0."""
 
     def test_reports_no_device_on_cpu_only_worker(self):
+        """A worker with no CUDA device reports device_count 0 without raising."""
         result = gpu_probe.gpu_check()
         # On a CPU-only machine (no CUDA driver), cupy either fails to import or
         # finds no device; either way device_count is 0 and nothing raises.
@@ -86,11 +87,13 @@ class TestGpuCheck(unittest.TestCase):
         self.assertFalse(result["gpu4pyscf_import"])
 
     def test_always_includes_the_contract_keys(self):
+        """The probe always returns its documented keys, regardless of hardware."""
         result = gpu_probe.gpu_check()
         for key in ("cupy_import", "device_count", "gpu4pyscf_import", "cache_dirs"):
             self.assertIn(key, result)
 
     def test_has_gpu_is_false_on_cpu_only_worker(self):
+        """has_gpu reflects device_count 0 as False on a CPU-only worker."""
         self.assertFalse(gpu_probe.has_gpu())
 
 

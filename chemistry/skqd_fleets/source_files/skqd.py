@@ -60,6 +60,7 @@ class SKQDResult:
     energy_history: list[float] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        """Return the result as a JSON/serialization-friendly plain dict."""
         return {
             "energy": float(self.energy),
             "reference_energy": float(self.reference_energy),

@@ -30,15 +30,16 @@ class TestSKQDResultToDict(unittest.TestCase):
     """to_dict coerces to serialization-friendly types."""
 
     def _make(self, **overrides):
-        kwargs = dict(
-            energy=-2.1,
-            reference_energy=-2.2,
-            error=0.1,
-            krylov_dim=5,
-            num_configurations=12,
-            norb=4,
-            nelec=(2, 2),
-        )
+        """Build an SKQDResult with sensible defaults, overriding named fields."""
+        kwargs = {
+            "energy": -2.1,
+            "reference_energy": -2.2,
+            "error": 0.1,
+            "krylov_dim": 5,
+            "num_configurations": 12,
+            "norb": 4,
+            "nelec": (2, 2),
+        }
         kwargs.update(overrides)
         return SKQDResult(**kwargs)
 
@@ -49,6 +50,7 @@ class TestSKQDResultToDict(unittest.TestCase):
         self.assertEqual(d["nelec"], [2, 2])
 
     def test_scalar_types_are_native_python(self):
+        """Energies serialize as float and counts/dimensions as int."""
         d = self._make().to_dict()
         for key in ("energy", "reference_energy", "error"):
             self.assertIsInstance(d[key], float)
@@ -56,11 +58,13 @@ class TestSKQDResultToDict(unittest.TestCase):
             self.assertIsInstance(d[key], int)
 
     def test_optional_lists_default_to_empty(self):
+        """occupancies and energy_history default to empty lists when unset."""
         d = self._make().to_dict()
         self.assertEqual(d["occupancies"], [])
         self.assertEqual(d["energy_history"], [])
 
     def test_list_fields_are_coerced_to_floats(self):
+        """Integer list inputs are coerced to floats in the serialized output."""
         d = self._make(occupancies=[1, 0], energy_history=[-2, -2.1]).to_dict()
         self.assertTrue(all(isinstance(x, float) for x in d["occupancies"]))
         self.assertTrue(all(isinstance(x, float) for x in d["energy_history"]))

@@ -57,19 +57,23 @@ class TestBuildHamiltonian(unittest.TestCase):
         cls.chem = build_hamiltonian(ATOM, basis="sto-3g", use_gpu=False)
 
     def test_system_dimensions(self):
+        """H4/STO-3G yields 4 orbitals and (2, 2) electrons."""
         self.assertEqual(self.chem["norb"], 4)
         self.assertEqual(self.chem["nelec"], (2, 2))
 
     def test_integral_shapes(self):
+        """One- and two-body integrals have the expected orbital shapes."""
         norb = self.chem["norb"]
         self.assertEqual(self.chem["h1e"].shape, (norb, norb))
         self.assertEqual(self.chem["h2e"].shape, (norb, norb, norb, norb))
 
     def test_one_body_is_symmetric(self):
+        """The one-body integral matrix is symmetric."""
         h1e = self.chem["h1e"]
         np.testing.assert_allclose(h1e, h1e.T, atol=1e-10)
 
     def test_integrals_are_real_host_arrays(self):
+        """Integrals come back as real host ndarrays and a float nuclear repulsion."""
         # _to_host must have pulled everything off any device; plain float ndarrays.
         for key in ("h1e", "h2e"):
             self.assertIsInstance(self.chem[key], np.ndarray)
@@ -114,6 +118,7 @@ class TestKrylovCircuits(unittest.TestCase):
         cls.chem = build_hamiltonian(ATOM, basis="sto-3g", use_gpu=False)
 
     def test_builds_one_circuit_per_krylov_power(self):
+        """krylov_circuits returns krylov_dim fermionic and transpiled circuits."""
         fermionic, transpiled = krylov_circuits(
             krylov_dim=5,
             norb=self.chem["norb"],
@@ -150,6 +155,7 @@ class TestKrylovCircuits(unittest.TestCase):
         self.assertEqual(len(fermionic), 4)
 
     def test_single_circuit_builder_runs(self):
+        """build_krylov_circuit returns a circuit for a single Krylov power."""
         circuit = build_krylov_circuit(
             dim=2,
             norb=self.chem["norb"],

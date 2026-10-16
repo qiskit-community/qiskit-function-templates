@@ -62,7 +62,6 @@ def run_function(
     max_iterations: int = 3,
     seed: int = 24,
     use_gpu_scf: bool = True,
-    **kwargs,
 ) -> dict:
     """Run the SKQD pipeline and return the energy estimate and diagnostics.
 
@@ -93,30 +92,30 @@ def run_function(
 
     # Step 1: Map -- classical chemistry + Hamiltonian.
     update_status(Job.MAPPING)
-    t = time.time()
+    stage_start = time.time()
     chem = build_hamiltonian(atom, basis=basis, use_gpu=use_gpu_scf and on_gpu, logger=logger)
     norb, nelec = chem["norb"], chem["nelec"]
     h1e, h2e = chem["h1e"], chem["h2e"]
     logger.info("System: norb=%s nelec=%s basis=%s", norb, nelec, basis)
     ref_energy = reference_energy(h1e, h2e, norb, nelec) + chem["nuclear_repulsion"]
-    timings["map"] = time.time() - t
+    timings["map"] = time.time() - stage_start
 
     # Step 2: Optimize -- build + transpile the Krylov circuit family.
     update_status(Job.OPTIMIZING_HARDWARE)
-    t = time.time()
+    stage_start = time.time()
     fermionic_circuits, _transpiled = krylov_circuits(krylov_dim, norb, nelec, h1e, time_step)
-    timings["build_circuits"] = time.time() - t
+    timings["build_circuits"] = time.time() - stage_start
 
     # Step 3: Execute -- sample the Krylov circuits (statevector here).
     update_status(Job.EXECUTING_QPU)
-    t = time.time()
+    stage_start = time.time()
     counts = sample_circuits(fermionic_circuits, norb, nelec, shots=shots)
-    timings["sample"] = time.time() - t
+    timings["sample"] = time.time() - stage_start
     logger.info("Sampled %s distinct configurations.", len(counts))
 
     # Step 4: Post-process -- the heavy classical subspace diagonalization.
     update_status(Job.POST_PROCESSING)
-    t = time.time()
+    stage_start = time.time()
     result, history = diagonalize(
         counts,
         h1e,
@@ -128,7 +127,7 @@ def run_function(
         max_iterations=max_iterations,
         seed=seed,
     )
-    timings["diagonalize"] = time.time() - t
+    timings["diagonalize"] = time.time() - stage_start
 
     import numpy as np
 
