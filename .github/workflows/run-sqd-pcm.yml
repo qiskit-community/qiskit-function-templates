@@ -6,17 +6,13 @@ on:
     paths:
       - 'chemistry/sqd_pcm/**'
       - 'requirements-dev.txt'
-      - 'requirements-e2e.txt'
-      - 'tox.ini'
-      
+
   pull_request:
     branches: [main]
     paths:
       - 'chemistry/sqd_pcm/**'
       - 'requirements-dev.txt'
-      - 'requirements-e2e.txt'
-      - 'tox.ini'
-      
+
 jobs:
   call-tests:
     uses: ./.github/workflows/_unit-tests.yml
