@@ -10,6 +10,7 @@
 * [About](#about)
 * [Methodology](#methodology)
 * [Workflow sections](#workflow-sections)
+* [Benchmarking compute profiles](#benchmarking-compute-profiles)
 * [Dependencies](#dependencies)
 * [Citing this project](#citing-this-project)
 * [References](#references)
@@ -47,6 +48,22 @@ It generates one-electron and two-electron integrals within the defined active s
 
 It takes as the input the [PySCF Checkpoint file](https://github.com/pyscf/pyscf.github.io/blob/master/examples/misc/02-chkfile.py) containing the HF IEF-PCM information, the bitstrings representing the electron configurations predicted by LUCJ, as well as the user-defined SQD options selected in the input section. As an output it produces the SQD IEF-PCM total energy of the lowest energy batch as well as the corresponding solvation free energy. 
 
+----------------------------------------------------------------------------------------------------
+### Benchmarking compute profiles
+
+The [`compute_profile_benchmark.ipynb`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/chemistry/sqd_pcm/compute_profile_benchmark.ipynb) notebook measures how the choice of **Fleets compute profile** (CPU cores × memory) affects the runtime of the SQD IEF-PCM template, using the same methanol (14e, 12o) workload as [`deploy_and_run.ipynb`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/chemistry/sqd_pcm/deploy_and_run.ipynb).
+
+**Why post-processing is the stage to benchmark.** The workflow has two very different stages. Mapping and QPU sampling (SCF, CCSD, LUCJ build, transpile, and the hardware sampler job) are serial and identical regardless of profile. The SQD post-processing stage, by contrast, runs `number_of_batches` independent eigenstate solves (PySCF selected-CI Davidson diagonalization) per S-CORE iteration, and this part parallelizes across CPU cores — one batch per worker process. In a prior run, post-processing (~282 s) dominated the total, so it is the stage a larger profile actually speeds up.
+
+**How the demo isolates the compute profile as the only variable:**
+
+* **The QPU is bypassed.** The LUCJ measurement counts are produced on the QPU **once**, cached to a function-scoped file under `/function_user_data/`, and reused by every subsequent run. Every profile therefore diagonalizes *identical* input — no QPU queue noise, no run-to-run count variation, no repeated QPU cost.
+* **`number_of_batches` is fixed at 48** so the larger profiles have enough independent work to keep their cores busy, while `sqd_iterations` and `samples_per_batch` are held fixed across every run. (`samples_per_batch` is kept small so each batch is a fast, sparse diagonalization rather than a near-full-CI solve.)
+* **A `sizes_map` sweeps three CPU-only profiles** — `8x32`, `16x128`, and `48x768` — submitting one job per profile and reading the `POST_PROCESSING` time from each result's metadata.
+
+The notebook reports the post-processing time per profile, the speedup relative to the smallest profile, and a stacked-bar chart that separates the **parallel solve** (the per-batch diagonalizations, which shrink as the profile grows) from the **serial prep** (config recovery and subsampling between S-CORE iterations — the roughly constant Amdahl floor that no profile removes). It also surfaces `blas_threads_per_worker`, which trades per-solve speed against how many batches run at once and can be swept to find the optimum for a given profile.
+
+Key takeaways documented in the notebook: the speedup is **sub-linear** and floored by the serial prep stage; provisioning **more cores than batches** buys nothing on the concurrency axis (extra cores go to more threads per worker instead); and memory scales with concurrency rather than speed. 
 
 ### Dependencies
 
@@ -62,6 +79,8 @@ ffsim==0.0.54
 pyscf==2.9.0
 qiskit_addon_sqd==0.12.0
 ```
+
+The [`compute_profile_benchmark.ipynb`](https://github.com/qiskit-community/qiskit-function-templates/blob/main/chemistry/sqd_pcm/compute_profile_benchmark.ipynb) notebook additionally requires `matplotlib` and `numpy` on the client for the results chart.
 
 ----------------------------------------------------------------------------------------------------
 ### Citing this project
