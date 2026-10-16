@@ -34,6 +34,8 @@ from qiskit_serverless import (
     Job,
     get_runtime_service,
     get_logger,
+    get_function_size,
+    get_compute_profile,
 )
 
 logger = get_logger()
@@ -94,6 +96,19 @@ class CircuitFunction:
 
     def run(self) -> dict:
         """Execute the request."""
+
+        # When the function runs on the Fleets runner, the gateway resolves the
+        # compute profile from the ``function_size`` requested at ``run()`` time
+        # (or the function's ``default_size``). ``get_function_size`` and
+        # ``get_compute_profile`` report what was actually assigned, which is
+        # useful to log, to branch on, or to return in the result metadata. Both
+        # are empty when sizes do not apply -- i.e. a non-Fleets (Ray) job or
+        # local testing -- so treat that as the default.
+        logger.info(
+            "Compute: function_size=%s compute_profile=%s",
+            get_function_size(),
+            get_compute_profile(),
+        )
 
         # The circuit function encapsulates steps 2-4 of the Qiskit Pattern workflow:
         # https://docs.quantum.ibm.com/guides/intro-to-patterns
