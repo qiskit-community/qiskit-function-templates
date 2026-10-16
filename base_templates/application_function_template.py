@@ -33,6 +33,8 @@ from qiskit_serverless import (
     Job,
     get_runtime_service,
     get_logger,
+    get_function_size,
+    get_compute_profile,
 )
 
 logger = get_logger()
@@ -103,6 +105,17 @@ def run_function(
     else:
         backend = testing_backend
 
+    # When the function runs on the Fleets runner, the gateway resolves the
+    # compute profile from the ``function_size`` requested at ``run()`` time (or
+    # the function's ``default_size``). ``get_function_size`` and
+    # ``get_compute_profile`` report what was actually assigned, which is useful
+    # to log, to branch on (e.g. widen a parallel fan-out on a larger profile), or
+    # to return in the result metadata. Both are empty when sizes do not apply --
+    # i.e. a non-Fleets (Ray) job or local testing -- so treat that as the default.
+    function_size = get_function_size()
+    compute_profile = get_compute_profile()
+    logger.info("Compute: function_size=%s compute_profile=%s", function_size, compute_profile)
+
     # The primitive of choice is the `EstimatorV2`:
     # https://docs.quantum.ibm.com/guides/get-started-with-primitives#get-started-with-primitives
     # You can configure different `EstimatorOptions` to control the parameters of the hardware
@@ -116,7 +129,10 @@ def run_function(
             "measure_mitigation": True,
             "measure_noise_learning": {
                 "num_randomizations": 512,
-                "shots_per_randomization": 512,
+                # Use "auto" rather than an integer: as of qiskit-ibm-runtime
+                # 0.48, specifying measure_noise_learning.shots_per_randomization
+                # as an int is deprecated.
+                "shots_per_randomization": "auto",
             },
         },
         "twirling": {
