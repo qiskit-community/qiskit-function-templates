@@ -39,13 +39,15 @@ _default_blas_threads()
 from pathlib import Path
 from typing import Any
 from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing as mp
 import sys
 import json
 import time
+import shutil
+import tempfile
 import traceback
 import numpy as np
+
+import ray
 
 import ffsim
 
@@ -85,25 +87,24 @@ from solve_solvent import solve_solvent
 logger = get_logger()
 
 
-def _worker_warmup(_):
-    """No-op submitted once per worker to force (and time) spawn + PySCF import,
-    so the breakdown separates worker startup from solve time."""
-    return os.getpid()
-
-
-def _solve_solvent_worker(args):
-    """Run one ``solve_solvent`` batch in a worker process. Module-scope (not a
-    closure) so ProcessPoolExecutor can pickle it; takes one positional tuple."""
-    (
-        batch,
-        myeps,
-        mysolvmethod,
-        myavas,
-        num_orbitals,
-        spin_sq,
-        max_davidson,
-        checkpoint_file,
-    ) = args
+# One Ray task per batch. num_cpus=1 reserves a single core per task so the
+# CPU-bound solve does not share a core when several batches run at once. Defined
+# at module scope so the decorated remote function is importable in the Ray
+# workers. The per-worker BLAS/OpenMP thread count is set via
+# ray.init(runtime_env=...) at the call site, so each worker's numpy/pyscf import
+# reads the intended thread limits.
+@ray.remote(num_cpus=1)
+def _solve_solvent_remote(
+    batch,
+    myeps,
+    mysolvmethod,
+    myavas,
+    num_orbitals,
+    spin_sq,
+    max_davidson,
+    checkpoint_file,
+):
+    """Run one ``solve_solvent`` batch in a Ray worker process."""
     return solve_solvent(  # sqd for pyscf
         batch,
         myeps,
@@ -490,52 +491,50 @@ def run_function(
     # Convert counts into bitstring and probability arrays
     bitstring_matrix_full, probs_arr_full = counts_to_arrays(counts_dict)
 
-    # Independent, CPU-bound per-batch eigensolvers, run one-per-process across the
-    # profile's cores (replaces the Ray @distribute_task/get fan-out, which Fleets
-    # cannot use). Size from sched_getaffinity (the cgroup quota), not cpu_count
-    # (the whole node); fall back to cpu_count off Linux.
+    # The per-batch eigensolvers are independent and CPU-bound, so fan them out
+    # as one Ray task per batch (``_solve_solvent_remote``, num_cpus=1).
+    #
+    # Size the local Ray cluster from sched_getaffinity (the cgroup quota), not
+    # cpu_count (the whole node); fall back to cpu_count off Linux.
     try:
         available_cpus = len(os.sched_getaffinity(0))
     except AttributeError:
         available_cpus = os.cpu_count() or 1
+    # Number of batch tasks that may run concurrently (one cpu each). Ray is given
+    # this many cpus, so at most this many ``num_cpus=1`` tasks run at once.
     max_workers = min(n_batches, available_cpus)
 
-    # Threads per worker, set in the env before the (spawned) workers import numpy.
-    # Auto: ~2 threads per worker's core share (mild oversubscription, since the
-    # solve is only partly BLAS-bound), capped near 2x cores.
+    # Threads per worker. Auto: ~2 threads per worker's core share (mild
+    # oversubscription, since the solve is only partly BLAS-bound), capped near
+    # 2x cores. These are passed to Ray via runtime_env so each Ray worker reads
+    # them *before* importing numpy/pyscf; setting them only in this parent
+    # process would not reach the workers.
     if blas_threads_per_worker is not None:
         threads_per_worker = max(1, int(blas_threads_per_worker))
     else:
         threads_per_worker = max(1, (2 * available_cpus) // max_workers)
-    for _tv in (
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-        "VECLIB_MAXIMUM_THREADS",
-    ):
-        os.environ[_tv] = str(threads_per_worker)
+    thread_env = {
+        var: str(threads_per_worker)
+        for var in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+            "VECLIB_MAXIMUM_THREADS",
+        )
+    }
+
+    # Ray serializes the remote function by reference, so each worker re-imports
+    # this module and must resolve its sibling ``solve_solvent`` import. Workers do
+    # not inherit the driver's sys.path, so hand them this file's directory (where
+    # solve_solvent.py lives) on PYTHONPATH.
+    entrypoint_dir = str(Path(__file__).resolve().parent)
+    thread_env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (entrypoint_dir, os.environ.get("PYTHONPATH", "")) if p
+    )
     logger.info(
         f"Worker BLAS threads: {threads_per_worker} "
         f"(available_cpus={available_cpus}, max_workers={max_workers})"
-    )
-
-    # Start workers with "spawn", not the Linux default "fork". By this point the
-    # parent has imported PySCF and initialized OpenBLAS/OpenMP (and the openmpi
-    # library the fleet image loads). Forking a process that already holds native
-    # thread-pool / MPI locks gives the child an inherited-but-orphaned lock, and
-    # the worker's first BLAS/MPI call can then deadlock forever with no traceback
-    # -- which presents exactly as a silent hang after the batches are dispatched.
-    # A spawned worker starts a fresh interpreter that imports those libraries
-    # cleanly, at the cost of re-importing per worker (acceptable next to a
-    # multi-second solve). forkserver is used if spawn is somehow unavailable.
-    try:
-        mp_context = mp.get_context("spawn")
-    except ValueError:
-        mp_context = mp.get_context("forkserver")
-    logger.info(
-        f"Running {n_batches} batches across {max_workers} worker processes "
-        f"(start method: {mp_context.get_start_method()})"
     )
 
     e_hist = np.zeros((iterations, n_batches))  # energy history
@@ -544,24 +543,45 @@ def run_function(
     occupancy_hist = []
     avg_occupancy = None
 
-    # Create the pool ONCE and reuse it across all S-CORE iterations. Since spawn
-    # cold-imports PySCF per worker, a per-iteration pool would re-pay that import
-    # `iterations` times; one warm pool pays it once.
     num_ran_iter = 0
-    # Split post-processing time into worker startup / serial prep / parallel solve
+    # Split post-processing time into Ray startup / serial prep / parallel solve
     # (surfaced in the result metadata) rather than one opaque number.
     warmup_time = 0.0
     prep_time_total = 0.0
     solve_time_total = 0.0
 
-    with ProcessPoolExecutor(max_workers=max_workers, mp_context=mp_context) as executor:
-        # Force every worker to start (and cold-import PySCF under spawn) up front,
-        # and time it, so the startup cost is measured once here instead of hiding
-        # inside the first iteration's solve time.
+    # Start a local Ray cluster with one cpu per concurrent batch task, reusing an
+    # existing one if present. Only a few directories are writable, so give Ray a
+    # dedicated temp dir with HOME set to it (for the $HOME/.ray auth token) and
+    # disable its token auth (single-node, in-job cluster). The temp dir must be
+    # SHORT: Ray appends a ~60-byte "session_<ts>/sockets/plasma_store" and the
+    # resulting AF_UNIX socket path cannot exceed ~103 bytes. The system default is
+    # too long on some platforms (macOS $TMPDIR is under /var/folders/...), so root
+    # the dir at /tmp, falling back to the default only if /tmp is not usable. The
+    # env vars go in runtime_env too, so the Ray workers inherit them.
+    try:
+        ray_tmp_dir = tempfile.mkdtemp(prefix="ray-", dir="/tmp")
+    except OSError:
+        ray_tmp_dir = tempfile.mkdtemp(prefix="ray-")
+    ray_env = {
+        "RAY_AUTH_MODE": "disabled",
+        "HOME": ray_tmp_dir,
+    }
+    os.environ.update(ray_env)
+
+    try:
         start_warmup = time.time()
-        list(executor.map(_worker_warmup, range(max_workers)))
+        if not ray.is_initialized():
+            ray.init(
+                num_cpus=max_workers,
+                runtime_env={"env_vars": {**thread_env, **ray_env}},
+                _temp_dir=ray_tmp_dir,
+                include_dashboard=False,
+                ignore_reinit_error=True,
+                logging_level="warning",
+            )
         warmup_time = time.time() - start_warmup
-        logger.info(f"Worker pool warmup ({max_workers} workers): {warmup_time:.1f} s")
+        logger.info(f"Ray init / worker pool warmup ({max_workers} workers): {warmup_time:.1f} s")
 
         for i in range(iterations):
             iter_start = time.time()
@@ -600,7 +620,7 @@ def run_function(
                 num_batches=n_batches,
             )
 
-            # Run the per-batch eigenstate solvers in parallel across worker processes.
+            # Run the per-batch eigenstate solvers in parallel across Ray workers.
             e_tmp = np.zeros(n_batches)
             s_tmp = np.zeros(n_batches)
             g_solvs_tmp = np.zeros(n_batches)
@@ -618,33 +638,34 @@ def run_function(
             prep_time_total += prep_time
             start_solve = time.time()
 
-            # Submit all batches and collect via as_completed (not executor.map) so
-            # each batch logs as it finishes (progress vs. hang is visible) and a dead
-            # worker raises via future.result() instead of hanging. res[j] is filled by
-            # index to keep batch order, as Ray's get did.
-            res = [None] * n_batches
-            future_to_idx = {
-                executor.submit(
-                    _solve_solvent_worker,
-                    (
-                        batches[j],
-                        myeps,
-                        mymethod,
-                        myavas,
-                        num_orbitals,
-                        spin_sq,
-                        max_davidson_cycles,
-                        checkpoint_file_name,
-                    ),
-                ): j
+            # Submit every batch as a Ray task up front; refs[j] is the object ref
+            # for batch j, so the ``ray.get`` below returns results in batch order.
+            # We then poll with ``ray.wait`` purely to log progress as each batch
+            # finishes (so progress vs. hang stays visible in the job logs); a
+            # failed task re-raises when its ref is fetched.
+            refs = [
+                _solve_solvent_remote.remote(
+                    batches[j],
+                    myeps,
+                    mymethod,
+                    myavas,
+                    num_orbitals,
+                    spin_sq,
+                    max_davidson_cycles,
+                    checkpoint_file_name,
+                )
                 for j in range(n_batches)
-            }
+            ]
+            ref_to_idx = {ref: j for j, ref in enumerate(refs)}
+            not_done = list(refs)
             n_done = 0
-            for future in as_completed(future_to_idx):
-                j = future_to_idx[future]
-                res[j] = future.result()  # re-raises any worker exception here
-                n_done += 1
-                logger.info(f"Batch {j} solved ({n_done}/{n_batches} complete)")
+            while not_done:
+                done, not_done = ray.wait(not_done, num_returns=1)
+                for ref in done:
+                    n_done += 1
+                    logger.info(f"Batch {ref_to_idx[ref]} solved ({n_done}/{n_batches} complete)")
+            # Collect results in submission order; re-raises any task exception here.
+            res = ray.get(refs)
 
             solve_time = time.time() - start_solve
             solve_time_total += solve_time
@@ -677,6 +698,13 @@ def run_function(
             logger.info(f"Corresponding g_solv value: {g_solv_hist[i, lowest_e_batch_index]}")
             logger.info("-----------------------------------")
             num_ran_iter += 1
+    finally:
+        # Always tear the local Ray cluster down, even if a solve raised, so the
+        # entrypoint does not leak Ray processes on the runner, then remove the
+        # temp dir it was given.
+        if ray.is_initialized():
+            ray.shutdown()
+        shutil.rmtree(ray_tmp_dir, ignore_errors=True)
 
     end_pp = time.time()
     end = time.time()
@@ -702,11 +730,10 @@ def run_function(
             },
         },
         # Breakdown of the post-processing stage so the wall-clock can be
-        # attributed to worker startup vs. serial prep (config recovery +
+        # attributed to Ray startup vs. serial prep (config recovery +
         # subsampling, which does not scale with cores) vs. the parallel solve.
-        # Useful when comparing the process-pool runtime against the Ray baseline
-        # or across compute profiles: solve_wall_time is the part a bigger profile
-        # actually reduces.
+        # Useful when comparing across compute profiles: parallel_solve_time is
+        # the part a bigger profile actually reduces.
         "post_processing_breakdown": {
             "worker_warmup_time": warmup_time,
             "serial_prep_time": prep_time_total,
@@ -714,7 +741,7 @@ def run_function(
             "max_workers": max_workers,
             "available_cpus": available_cpus,
             "blas_threads_per_worker": threads_per_worker,
-            "start_method": mp_context.get_start_method(),
+            "start_method": "ray",
         },
         "num_iterations_executed": num_ran_iter,
     }
