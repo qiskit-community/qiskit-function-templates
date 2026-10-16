@@ -6,16 +6,12 @@ on:
     paths:
       - 'physics/aqc_trotter/**'
       - 'requirements-dev.txt'
-      - 'requirements-e2e.txt'
-      - 'tox.ini'
 
   pull_request:
     branches: [main]
     paths:
       - 'physics/aqc_trotter/**'
       - 'requirements-dev.txt'
-      - 'requirements-e2e.txt'
-      - 'tox.ini'
 
 jobs:
   call-tests:

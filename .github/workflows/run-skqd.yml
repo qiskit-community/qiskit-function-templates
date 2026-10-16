@@ -1,0 +1,21 @@
+name: SKQD Fleets Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'chemistry/skqd_fleets/**'
+      - 'requirements-dev.txt'
+
+  pull_request:
+    branches: [main]
+    paths:
+      - 'chemistry/skqd_fleets/**'
+      - 'requirements-dev.txt'
+
+jobs:
+  call-tests:
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      dir: chemistry/skqd_fleets
+      os-list: '["ubuntu-latest"]'
