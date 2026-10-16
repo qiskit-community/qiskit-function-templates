@@ -30,29 +30,25 @@ Three backends, selected by :attr:`ExecutionOptions.backend`:
   ``get_runtime_service()``, split across ``batches`` jobs. Requires IBM Quantum
   credentials and a gateway, so it is the one path the test suite cannot cover.
 """
+
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 import numpy as np
+import ray
 from qiskit import QuantumCircuit
 from qiskit.primitives import StatevectorEstimator
 from qiskit.quantum_info import SparsePauliOp
 
 from ._serverless import get_logger, get_runtime_service
-
-# Optional Ray fan-out for the in-process simulation paths (statevector / fake).
-# Ray is used directly (ray.remote / ray.get) rather than through a wrapper. On
-# the gateway it is already initialized; otherwise `_run_parallel` starts a
-# per-core cluster on first use. If ray is not installed the parallel path
-# disables itself and execution falls back to the sequential loop.
-try:  # pragma: no cover - present wherever ray is installed
-    import ray
-except Exception:  # pylint: disable=broad-exception-caught  # pragma: no cover
-    ray = None  # pylint: disable=invalid-name
 
 logger = get_logger(__name__)
 
@@ -80,10 +76,10 @@ class ExecutionOptions:
     # job is queued, then "executing" once it leaves the queue and starts running.
     on_status: Optional[Callable[[str], None]] = None
     # Local-sim fan-out toggle (statevector/fake only). True -> split the
-    # per-time-step PUBs across all cores Ray sees (chunked into Ray tasks);
-    # False -> the sequential loop (default, unchanged behavior). Ignored when
-    # Ray is absent or there is a single PUB. The runtime/QPU path is unaffected
-    # (it parallelizes via `batches`).
+    # per-time-step PUBs across all available cores (chunked, one worker process
+    # per chunk); False -> the sequential loop (default, unchanged behavior).
+    # Ignored when there is a single PUB. The runtime/QPU path is unaffected (it
+    # parallelizes via `batches`).
     parallel_sim: bool = False
 
 
@@ -264,9 +260,9 @@ def _run_local_chunk(
     """Run one chunk of PUBs on a local-sim backend; returns ``(n_sub, n_obs)``.
 
     Self-contained (rebuilds its own estimator/backend) so it can run in a
-    separate Ray worker process, and it reuses the exact sequential
-    implementations — a chunk computes bit-for-bit what the sequential path
-    would for those same PUBs.
+    separate worker process, and it reuses the exact sequential implementations —
+    a chunk computes bit-for-bit what the sequential path would for those same
+    PUBs.
     """
     if backend == "statevector":
         return _run_statevector(sub_pubs)
@@ -282,37 +278,103 @@ def _run_local_chunk(
 def _run_parallel(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     """Fan the per-PUB loop out across all available cores as Ray tasks, chunked.
 
-    One task per chunk (not per PUB) so each task builds its estimator once and
+    One task per chunk (not per PUB) so each rebuilds its estimator once and
     amortizes that setup over its circuits. Row order is preserved.
     """
     n_pubs = len(pubs)
 
-    if not ray.is_initialized():
-        # No-op on the gateway (Ray already up); locally starts a per-core
-        # cluster. ignore_reinit_error guards against a concurrent init.
-        ray.init(ignore_reinit_error=True)
+    # Cores available to this container. sched_getaffinity honors the cgroup/
+    # cpuset quota (os.cpu_count reports the whole node); fall back off Linux.
+    try:
+        n_cores = len(os.sched_getaffinity(0))
+    except AttributeError:
+        n_cores = os.cpu_count() or n_pubs
 
-    # Full available parallel capacity: one chunk per core Ray sees, capped at
-    # the number of circuits (never more chunks than PUBs).
-    n_cores = int(ray.cluster_resources().get("CPU", n_pubs))
+    # One chunk per core, never more chunks than PUBs.
     n_chunks = max(1, min(n_cores, n_pubs))
     groups = [g for g in np.array_split(np.arange(n_pubs), n_chunks) if len(g)]
     logger.info("Executing %d PUBs across %d Ray task(s) (%d cores).", n_pubs, len(groups), n_cores)
 
-    remote = ray.remote(_run_local_chunk)
-    refs = [
-        remote.remote(
-            opts.backend,
-            [pubs[i] for i in g],
-            opts.backend_name,
-            opts.transpiler_options,
-            opts.estimator_options,
+    # Pin BLAS/OpenMP to 1 thread per worker: the local estimators (Aer /
+    # statevector) are already multi-threaded, so N tasks each spinning up N
+    # threads would oversubscribe the cores. Passed to Ray via runtime_env so each
+    # worker reads them before importing numpy/Aer.
+    worker_env = {
+        var: "1"
+        for var in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
         )
-        for g in groups
-    ]
-    blocks = ray.get(refs)
+    }
+
+    # Ray serializes the remote function by reference, so each worker re-imports
+    # the module it lives in and needs the repository root (the anchor of the
+    # ``physics.aqc_trotter.source_files.source.execute`` import path) on its path.
+    # Workers do not inherit the driver's sys.path, so hand it to them explicitly.
+    repo_root = str(Path(__file__).resolve().parents[4])
+    worker_env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (repo_root, os.environ.get("PYTHONPATH", "")) if p
+    )
+
+    # Start a local Ray cluster with one cpu per chunk, reusing an existing one if
+    # present. Only a few directories are writable, so give Ray a dedicated temp
+    # dir with HOME set to it (for the $HOME/.ray auth token) and disable its token
+    # auth (single-node, in-job cluster). The temp dir must be SHORT: Ray appends
+    # a ~60-byte "session_<ts>/sockets/plasma_store" and the resulting AF_UNIX
+    # socket path cannot exceed ~103 bytes. The system default is too long on some
+    # platforms (macOS $TMPDIR is under /var/folders/...), so root the dir at /tmp,
+    # falling back to the default only if /tmp is not usable. The env vars go in
+    # runtime_env too, so the Ray workers inherit them.
+    try:
+        ray_tmp_dir = tempfile.mkdtemp(prefix="ray-", dir="/tmp")
+    except OSError:
+        ray_tmp_dir = tempfile.mkdtemp(prefix="ray-")
+    ray_env = {"RAY_AUTH_MODE": "disabled", "HOME": ray_tmp_dir}
+    os.environ.update(ray_env)
 
     rows: list[Optional[np.ndarray]] = [None] * n_pubs
+    try:
+        if not ray.is_initialized():
+            ray.init(
+                num_cpus=len(groups),
+                runtime_env={"env_vars": {**worker_env, **ray_env}},
+                _temp_dir=ray_tmp_dir,
+                include_dashboard=False,
+                ignore_reinit_error=True,
+                logging_level="warning",
+            )
+
+        remote = ray.remote(num_cpus=1)(_run_local_chunk)
+        refs = [
+            remote.remote(
+                opts.backend,
+                [pubs[i] for i in g],
+                opts.backend_name,
+                opts.transpiler_options,
+                opts.estimator_options,
+            )
+            for g in groups
+        ]
+        # Poll with ray.wait to log progress as each chunk finishes (so progress
+        # vs. hang stays visible in the job logs); a failed task re-raises when its
+        # ref is fetched below.
+        ref_to_idx = {ref: i for i, ref in enumerate(refs)}
+        not_done = list(refs)
+        n_done = 0
+        while not_done:
+            done, not_done = ray.wait(not_done, num_returns=1)
+            for ref in done:
+                n_done += 1
+                logger.info("Chunk %d done (%d/%d).", ref_to_idx[ref], n_done, len(refs))
+        # Collect in submission order; re-raises any task exception here.
+        blocks = ray.get(refs)
+    finally:
+        if ray.is_initialized():
+            ray.shutdown()
+        shutil.rmtree(ray_tmp_dir, ignore_errors=True)
+
     for group, block in zip(groups, blocks):
         for local_i, global_i in enumerate(group):
             rows[global_i] = block[local_i]
@@ -326,14 +388,9 @@ def run_pubs(pubs: Iterable[PubLike], opts: ExecutionOptions) -> np.ndarray:
         raise ValueError("At least one PUB is required.")
     # Local-sim fan-out (opt-in via `parallel_sim`): the runtime path has its own
     # axis (`batches`) and is never fanned out here.
-    if (
-        opts.backend in ("statevector", "fake")
-        and opts.parallel_sim
-        and ray is not None
-        and len(pubs) > 1
-    ):
+    if opts.backend in ("statevector", "fake") and opts.parallel_sim and len(pubs) > 1:
         logger.info(
-            "Executing %d PUBs on %s in parallel (Ray fan-out).",
+            "Executing %d PUBs on %s in parallel (process-pool fan-out).",
             len(pubs),
             opts.backend,
         )
