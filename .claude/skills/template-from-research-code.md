@@ -162,17 +162,96 @@ instance = "MY_INSTANCE"
 serverless = QiskitServerless(token=token, instance=instance)
 ```
 
-Then upload the function, run it with a small example, and show reading the result.
+Then upload the function and run it with a small example. These templates are
+**custom functions** — the uploader owns the whole definition, unlike a provider
+function where the maintainer registers it. Upload with `QiskitFunction` and run the
+returned handle:
+
+```python
+from qiskit_ibm_catalog import QiskitFunction
+
+template = QiskitFunction(
+    title="<name>_template",
+    entrypoint="<name>_entrypoint.py",
+    working_dir="./source_files/",   # everything here is uploaded
+    runner="fleets",                 # Fleets runner (see Step 6 on sizing)
+)
+serverless.upload(template)
+
+job = template.run(backend_name=..., <workflow args>)
+print(job.job_id)
+result = job.result()
+```
+
 If the notebook is committed with executed output, make sure no real token, CRN,
 account id, or job id is left in a cell's source or output — replace any job id with
 a placeholder.
 
-## Step 6 — README.md
+## Step 6 — Sizes and compute profiles
 
-A short README: what the function computes, its inputs/outputs, and a minimal usage
-snippet. Model the length and headings on the sibling templates.
+**Most templates need nothing here** — uploading with `runner="fleets"` and no
+`sizes_map` runs on a default profile, and that is fine for a first contribution
+(the `aqc_trotter` template does exactly this). Add sizing only if the workload is
+heavy enough to care about CPU/memory, or scales with a bigger machine (as a
+parallel fan-out does — see **Parallelism**).
 
-## Step 7 — Check it
+If you do add it, declare the catalog **at upload time** on the `QiskitFunction`
+(these are custom functions, so the catalog lives in the function definition, not in
+a separate deploy script):
+
+```python
+# Label -> compute profile. Labels are yours to choose; the right-hand side is a
+# Fleets compute profile "<cpu>x<memory_GB>" (e.g. CPU-only profiles below).
+SIZES_MAP = {
+    "s": "8x32",     # 8 CPU,  32 GB
+    "m": "16x128",   # 16 CPU, 128 GB
+    "l": "48x768",   # 48 CPU, 768 GB
+}
+
+template = QiskitFunction(
+    title="<name>_template",
+    entrypoint="<name>_entrypoint.py",
+    working_dir="./source_files/",
+    runner="fleets",
+    sizes_map=SIZES_MAP,
+    default_size="s",
+)
+```
+
+and pick a size per run:
+
+```python
+job = template.run(backend_name=..., <workflow args>, function_size="m")
+```
+
+Best practices:
+
+- **Start small.** Make `default_size` the smallest profile that works, so an
+  unqualified `run()` is cheap. Users opt into bigger machines explicitly with
+  `function_size`.
+- **Only offer sizes the workload can use.** More CPUs help only if the function
+  actually parallelizes across them (the `_run_parallel` fan-out sizes itself from
+  the cores the profile grants). More memory helps a bigger problem. Do not list an
+  `"xl"` that behaves exactly like `"m"`.
+- **A `function_size` must be a label in `sizes_map`, and `default_size` must too.**
+  Keep labels short and lowercase (`"s"`/`"m"`/`"l"`/`"xl"`) matching the existing
+  templates.
+- **Profiles are `"<cpu>x<memory_GB>"`.** GPU profiles exist (used by GPU
+  templates), but a profile that is not available for the deployment makes the run
+  fail — if unsure which profiles you can use, ask on the project channel rather than
+  guessing.
+- **Document the sizes** in the README and show a representative one in the notebook.
+  If the template benefits from scaling, a short size sweep (one run per label,
+  reporting the timing from the result's metadata) is a strong addition — see
+  `chemistry/sqd_pcm/compute_profile_benchmark.ipynb` for the pattern.
+
+## Step 7 — README.md
+
+A short README: what the function computes, its inputs/outputs, the sizes it offers
+(if any), and a minimal usage snippet. Model the length and headings on the sibling
+templates.
+
+## Step 8 — Check it
 
 Before handing back, confirm:
 
