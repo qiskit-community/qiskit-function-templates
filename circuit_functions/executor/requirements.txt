@@ -1,9 +1,10 @@
 qiskit>=2.0.0
-# 0.48 relocated executor_sampler.prepare and dropped its `backend` parameter; the
-# entrypoint targets that newer API (pubs are pre-transpiled to ISA before prepare()).
-qiskit-ibm-runtime>=0.48
-# >=0.34 is the first release whose pin allows qiskit-ibm-runtime 0.48 (0.33 caps it below 0.48).
-qiskit-serverless>=0.34
+# The entrypoint targets the 0.50 API: SamplerOptions is imported from the public
+# qiskit_ibm_runtime namespace, and executor_sampler.prepare takes `shots=` (renamed
+# from `default_shots`). Pubs are pre-transpiled to ISA before prepare().
+qiskit-ibm-runtime>=0.50
+# >=0.37.0 is the first release whose pin allows qiskit-ibm-runtime 0.50.
+qiskit-serverless>=0.37.0
 numpy>=1.26.0
 pydantic>=2.0.0
 

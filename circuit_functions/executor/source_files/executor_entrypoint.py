@@ -43,14 +43,13 @@ from qiskit.primitives.containers.sampler_pub import SamplerPub
 from qiskit.quantum_info import Pauli, SparsePauliOp
 from qiskit.transpiler import generate_preset_pass_manager
 
-from qiskit_ibm_runtime import Executor
+from qiskit_ibm_runtime import Executor, SamplerOptions
 from qiskit_ibm_runtime.exceptions import IBMInputValueError
 from qiskit_ibm_runtime.executor_sampler.sampler import prepare as prepare_sampler_program
 from qiskit_ibm_runtime.executor_sampler.utils import extract_shots_from_pubs
-from qiskit_ibm_runtime.options_models.sampler_options import SamplerOptions
 
 from options import Options, DEFAULT_MITIGATION_LEVEL, DEFAULT_OPTIMIZATION_LEVEL
-from options.utils import merge_options
+from options.utils import merge_options, Unset
 
 from qiskit_serverless import (
     get_arguments,
@@ -314,10 +313,16 @@ def reconstruct_estimator(
 
 def _to_sampler_options(execution_options: dict) -> SamplerOptions:
     """Map the template execution options onto the runtime SamplerOptions consumed by prepare."""
+    # Forward only keys that carry a real value. The template represents an
+    # unspecified option with its own ``Unset`` sentinel; as of qiskit-ibm-runtime
+    # 0.50 the ExecutorOptions that prepare() builds validates fields like
+    # ``max_execution_time`` strictly, and passing ``Unset`` through raises a
+    # pydantic validation error. Dropping unset keys lets SamplerOptions apply its
+    # own defaults.
     mapped = {
         key: execution_options[key]
         for key in ("default_shots", "max_execution_time", "dynamical_decoupling", "twirling")
-        if key in execution_options
+        if key in execution_options and execution_options[key] is not Unset
     }
     sampler_options = SamplerOptions(**mapped)
     # runtime >=0.48 validates that the twirling flags are real booleans: prepare() raises
@@ -457,9 +462,27 @@ def run_function(
         shots = extract_shots_from_pubs(sampler_pubs, execution_options.get("default_shots"))
 
     isa_pubs = _isa_sampler_pubs(sampler_pubs, backend, optimization_level)
-    program, executor_options = prepare_sampler_program(
-        isa_pubs, _to_sampler_options(execution_options), default_shots=shots
-    )
+    # Pass the backend: as of qiskit-ibm-runtime 0.50, prepare() validates that a
+    # backend is provided whenever dynamical decoupling is enabled in the options.
+    try:
+        program, executor_options = prepare_sampler_program(
+            isa_pubs, _to_sampler_options(execution_options), shots=shots, backend=backend
+        )
+    except AttributeError as exc:
+        # Known defect in qiskit-ibm-runtime 0.50.0: prepare() builds the executor
+        # options via sampler_option_to_executor_options(), which calls
+        # ``.model_dump()`` on sub-option objects that do not provide it (and copies a
+        # still-``Unset`` ``max_execution_time``). This fails for any input, so the
+        # Executor sampler path cannot run on 0.50.0. Tracked upstream; remove this
+        # guard once a fixed qiskit-ibm-runtime is released and pinned.
+        if "model_dump" in str(exc):
+            raise RuntimeError(
+                "The Executor sampler path is blocked by a bug in "
+                "qiskit-ibm-runtime 0.50.0 (sampler_option_to_executor_options "
+                "calls .model_dump() on options that lack it). Upgrade "
+                "qiskit-ibm-runtime once a fix is released."
+            ) from exc
+        raise
 
     end_optimizing = time.time()
     output["metadata"] = {

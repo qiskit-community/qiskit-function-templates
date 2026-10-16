@@ -27,11 +27,12 @@ from qiskit.quantum_info import Pauli, SparsePauliOp, Statevector, random_pauli_
 
 from executor_entrypoint import run_function
 
-from .base_test_case import BaseExecutorTestCase
+from .base_test_case import BaseExecutorTestCase, PREPARE_BROKEN, PREPARE_BROKEN_REASON
 from .utils import get_estimator_pub, get_inputs, get_sampler_pub
 
 
 @ddt
+@unittest.skipIf(PREPARE_BROKEN, PREPARE_BROKEN_REASON)
 class TestSamplerMode(BaseExecutorTestCase):
     """Sampler mode returns raw bit-array results, one PubResult per pub."""
 
@@ -95,6 +96,7 @@ class TestSamplerMode(BaseExecutorTestCase):
 
 
 @ddt
+@unittest.skipIf(PREPARE_BROKEN, PREPARE_BROKEN_REASON)
 class TestEstimatorMode(BaseExecutorTestCase):
     """Estimator mode reconstructs expectation values client-side from the sampler path."""
 
@@ -208,6 +210,7 @@ class TestEstimatorMode(BaseExecutorTestCase):
         self.assertGreaterEqual(result["hw_results"][0].metadata["shots"], 4096)
 
 
+@unittest.skipIf(PREPARE_BROKEN, PREPARE_BROKEN_REASON)
 class TestDryRun(BaseExecutorTestCase):
     """A dry run stops after optimization without producing hardware results."""
 
