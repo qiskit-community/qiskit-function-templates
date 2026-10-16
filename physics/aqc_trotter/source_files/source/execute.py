@@ -322,10 +322,15 @@ def _run_parallel(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     # present. Only a few directories are writable, so give Ray a dedicated temp
     # dir with HOME set to it (for the $HOME/.ray auth token) and disable its token
     # auth (single-node, in-job cluster). The temp dir must be SHORT: Ray appends
-    # "session_<ts>/sockets/plasma_store" and the AF_UNIX socket path cannot exceed
-    # 107 bytes, so use a mkdtemp under the system temp dir. The env vars go in
+    # a ~60-byte "session_<ts>/sockets/plasma_store" and the resulting AF_UNIX
+    # socket path cannot exceed ~103 bytes. The system default is too long on some
+    # platforms (macOS $TMPDIR is under /var/folders/...), so root the dir at /tmp,
+    # falling back to the default only if /tmp is not usable. The env vars go in
     # runtime_env too, so the Ray workers inherit them.
-    ray_tmp_dir = tempfile.mkdtemp(prefix="ray-")
+    try:
+        ray_tmp_dir = tempfile.mkdtemp(prefix="ray-", dir="/tmp")
+    except OSError:
+        ray_tmp_dir = tempfile.mkdtemp(prefix="ray-")
     ray_env = {"RAY_AUTH_MODE": "disabled", "HOME": ray_tmp_dir}
     os.environ.update(ray_env)
 
