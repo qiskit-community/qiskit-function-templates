@@ -10,15 +10,14 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Parallel execution path (statevector/fake): parallel must equal sequential.
+"""Ray fan-out execution path (statevector/fake): parallel must equal sequential.
 
 Opt-in ``parallel_sim=True`` fans the per-time-step PUB loop across all available
-cores as worker processes (``execute._run_parallel``, a stdlib
-``ProcessPoolExecutor``). For the exact ``statevector`` path the parallel output
-must match the sequential output bit-for-bit — this guards that the fan-out is a
-pure refactor of *what* is computed, only *where* it runs. One case drives the
-full ``DynamicsFunction`` pipeline to confirm the ``parallel_sim`` input is
-plumbed end-to-end.
+cores as Ray tasks (``execute._run_parallel``). For the exact ``statevector``
+path the parallel output must match the sequential output bit-for-bit — this
+guards that the fan-out is a pure refactor of *what* is computed, only *where*
+it runs. One case drives the full ``DynamicsFunction`` pipeline to confirm the
+``parallel_sim`` input is plumbed end-to-end.
 """
 
 import unittest
@@ -52,10 +51,10 @@ def _pubs(n, count):
 
 
 class TestParallelExecute(unittest.TestCase):
-    """Process-pool fan-out must reproduce the sequential result exactly.
+    """Ray fan-out must reproduce the sequential result exactly.
 
-    The fan-out uses a stdlib ProcessPoolExecutor (no Ray), so this runs on the
-    plain runtime with no cluster setup. ``subTest`` keeps the scenarios reported
+    ``_run_parallel`` starts and shuts down its own local Ray cluster, so the test
+    needs no cluster setup of its own. ``subTest`` keeps the scenarios reported
     separately while sharing one test id.
     """
 
@@ -92,7 +91,7 @@ class TestParallelExecute(unittest.TestCase):
 
 
 class TestParallelSimNotFannedOut(unittest.TestCase):
-    """`parallel_sim=True` requests that never fan out, so no pool is created."""
+    """`parallel_sim=True` requests that never fan out, so no cluster is created."""
 
     def test_single_pub_not_fanned_out(self):
         """A single PUB is never parallelized, even with parallel_sim=True."""

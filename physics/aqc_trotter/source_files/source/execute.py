@@ -33,15 +33,17 @@ Three backends, selected by :attr:`ExecutionOptions.backend`:
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import os
+import shutil
+import tempfile
 import time
-from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 import numpy as np
+import ray
 from qiskit import QuantumCircuit
 from qiskit.primitives import StatevectorEstimator
 from qiskit.quantum_info import SparsePauliOp
@@ -274,12 +276,10 @@ def _run_local_chunk(
 
 
 def _run_parallel(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
-    """Fan the per-PUB loop out across all available cores, chunked.
+    """Fan the per-PUB loop out across all available cores as Ray tasks, chunked.
 
-    One worker process per chunk (not per PUB) so each rebuilds its estimator
-    once and amortizes that setup over its circuits. Row order is preserved.
-    Replaces the previous Ray fan-out: the Fleets runner ships no Ray and runs
-    the entrypoint as a single process, so a stdlib ProcessPoolExecutor is used.
+    One task per chunk (not per PUB) so each rebuilds its estimator once and
+    amortizes that setup over its circuits. Row order is preserved.
     """
     n_pubs = len(pubs)
 
@@ -293,48 +293,86 @@ def _run_parallel(pubs: list[PubLike], opts: ExecutionOptions) -> np.ndarray:
     # One chunk per core, never more chunks than PUBs.
     n_chunks = max(1, min(n_cores, n_pubs))
     groups = [g for g in np.array_split(np.arange(n_pubs), n_chunks) if len(g)]
-    logger.info(
-        "Executing %d PUBs across %d worker process(es) (%d cores).", n_pubs, len(groups), n_cores
-    )
+    logger.info("Executing %d PUBs across %d Ray task(s) (%d cores).", n_pubs, len(groups), n_cores)
 
     # Pin BLAS/OpenMP to 1 thread per worker: the local estimators (Aer /
-    # statevector) are already multi-threaded, so N processes each spinning up N
-    # threads would oversubscribe the cores. Set before the workers start; the
-    # spawned workers inherit it at their own import time.
-    for _tv in (
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
-        "MKL_NUM_THREADS",
-        "NUMEXPR_NUM_THREADS",
-    ):
-        os.environ.setdefault(_tv, "1")
+    # statevector) are already multi-threaded, so N tasks each spinning up N
+    # threads would oversubscribe the cores. Passed to Ray via runtime_env so each
+    # worker reads them before importing numpy/Aer.
+    worker_env = {
+        var: "1"
+        for var in (
+            "OMP_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        )
+    }
 
-    # "spawn" (not the Linux default "fork"): the parent has already imported
-    # jax / numba / Aer native libraries, and forking a process holding their
-    # locks can deadlock in the worker. A spawned worker imports them cleanly.
-    try:
-        ctx = mp.get_context("spawn")
-    except ValueError:  # pragma: no cover
-        ctx = mp.get_context("forkserver")
+    # Ray serializes the remote function by reference, so each worker re-imports
+    # the module it lives in and needs the repository root (the anchor of the
+    # ``physics.aqc_trotter.source_files.source.execute`` import path) on its path.
+    # Workers do not inherit the driver's sys.path, so hand it to them explicitly.
+    repo_root = str(Path(__file__).resolve().parents[4])
+    worker_env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (repo_root, os.environ.get("PYTHONPATH", "")) if p
+    )
+
+    # Start a local Ray cluster with one cpu per chunk, reusing an existing one if
+    # present. Only a few directories are writable, so give Ray a dedicated temp
+    # dir with HOME set to it (for the $HOME/.ray auth token) and disable its token
+    # auth (single-node, in-job cluster). The temp dir must be SHORT: Ray appends
+    # "session_<ts>/sockets/plasma_store" and the AF_UNIX socket path cannot exceed
+    # 107 bytes, so use a mkdtemp under the system temp dir. The env vars go in
+    # runtime_env too, so the Ray workers inherit them.
+    ray_tmp_dir = tempfile.mkdtemp(prefix="ray-")
+    ray_env = {"RAY_AUTH_MODE": "disabled", "HOME": ray_tmp_dir}
+    os.environ.update(ray_env)
 
     rows: list[Optional[np.ndarray]] = [None] * n_pubs
-    with ProcessPoolExecutor(max_workers=len(groups), mp_context=ctx) as executor:
-        futures = {
-            executor.submit(
-                _run_local_chunk,
+    try:
+        if not ray.is_initialized():
+            ray.init(
+                num_cpus=len(groups),
+                runtime_env={"env_vars": {**worker_env, **ray_env}},
+                _temp_dir=ray_tmp_dir,
+                include_dashboard=False,
+                ignore_reinit_error=True,
+                logging_level="warning",
+            )
+
+        remote = ray.remote(num_cpus=1)(_run_local_chunk)
+        refs = [
+            remote.remote(
                 opts.backend,
                 [pubs[i] for i in g],
                 opts.backend_name,
                 opts.transpiler_options,
                 opts.estimator_options,
-            ): g
+            )
             for g in groups
-        }
-        for future in futures:
-            group = futures[future]
-            block = future.result()  # re-raises any worker exception here
-            for local_i, global_i in enumerate(group):
-                rows[global_i] = block[local_i]
+        ]
+        # Poll with ray.wait to log progress as each chunk finishes (so progress
+        # vs. hang stays visible in the job logs); a failed task re-raises when its
+        # ref is fetched below.
+        ref_to_idx = {ref: i for i, ref in enumerate(refs)}
+        not_done = list(refs)
+        n_done = 0
+        while not_done:
+            done, not_done = ray.wait(not_done, num_returns=1)
+            for ref in done:
+                n_done += 1
+                logger.info("Chunk %d done (%d/%d).", ref_to_idx[ref], n_done, len(refs))
+        # Collect in submission order; re-raises any task exception here.
+        blocks = ray.get(refs)
+    finally:
+        if ray.is_initialized():
+            ray.shutdown()
+        shutil.rmtree(ray_tmp_dir, ignore_errors=True)
+
+    for group, block in zip(groups, blocks):
+        for local_i, global_i in enumerate(group):
+            rows[global_i] = block[local_i]
     return np.vstack(rows)
 
 

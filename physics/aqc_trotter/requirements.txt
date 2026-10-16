@@ -6,11 +6,12 @@
 # transitively (numpy, scipy, pydantic, quimb, qiskit-quimb, jax/jaxlib, cotengra).
 
 qiskit~=2.5.0
-# parallel_sim (source/execute.py) fans out over a stdlib ProcessPoolExecutor,
-# so the [ray] extra is no longer needed (the Fleets image ships no Ray).
-qiskit-serverless
+qiskit-serverless>=0.37.0
 # fake-backend + runtime estimator paths (source/execute.py)
 qiskit-ibm-runtime
+# Ray is used directly (ray.remote/ray.get) to fan parallel_sim out across the
+# available cores (source/execute.py).
+ray>=2.59
 
 # Stage-2 AQC stack; pulls quimb, qiskit-quimb, jax(+jaxlib), cotengra.
 qiskit-addon-aqc-tensor[quimb-jax]==0.3.1
