@@ -189,7 +189,9 @@ def reference_energy(h1e: np.ndarray, h2e: np.ndarray, norb: int, nelec: tuple[i
 # --------------------------------------------------------------------------- #
 # 2. Krylov circuit family -- the fan-out unit
 # --------------------------------------------------------------------------- #
-def build_krylov_circuit(dim: int, norb: int, nelec: tuple[int, int], h1e: np.ndarray, time_step: float):
+def build_krylov_circuit(
+    dim: int, norb: int, nelec: tuple[int, int], h1e: np.ndarray, time_step: float
+):
     """Build one untranspiled ``FermionicCircuit`` for Krylov power ``dim``.
 
     A reference Slater determinant followed by a ``dim``-step second-order
@@ -251,7 +253,9 @@ def krylov_circuits(
 # --------------------------------------------------------------------------- #
 # 3. Sampling (statevector; a real backend would execute the transpiled circuits)
 # --------------------------------------------------------------------------- #
-def sample_circuits(fermionic_circuits, norb: int, nelec: tuple[int, int], shots: int = 1000) -> Counter:
+def sample_circuits(
+    fermionic_circuits, norb: int, nelec: tuple[int, int], shots: int = 1000
+) -> Counter:
     """Statevector-sample each Krylov circuit with ffsim, pooling the counts."""
     import ffsim
 
@@ -259,7 +263,9 @@ def sample_circuits(fermionic_circuits, norb: int, nelec: tuple[int, int], shots
     counts: Counter = Counter()
     for dim, fermionic_circuit in enumerate(fermionic_circuits):
         statevector = ffsim.apply_unitary(reference, fermionic_circuit, norb=norb, nelec=nelec)
-        samples = ffsim.sample_state_vector(statevector, norb=norb, nelec=nelec, shots=shots, seed=dim)
+        samples = ffsim.sample_state_vector(
+            statevector, norb=norb, nelec=nelec, shots=shots, seed=dim
+        )
         counts += Counter(samples)
     return counts
 
