@@ -51,11 +51,16 @@ def work(cores, **problem):  # pylint: disable=unused-argument
 
     Make it a generator so one-time setup is not measured::
 
-        from my_workflow import build, solve   # setup
+        sys.path.insert(0, "/path/to/their/code")   # where their modules live
+        from my_workflow import build, solve        # setup
         h = build(**problem)
-        yield                                  # everything after this is measured
-        solve(h, n_workers=cores)
+        yield                                       # everything after this is measured
+        solve(h, n_workers=cores)                   # tie any worker/pool count to `cores`
+
+    If their code takes a worker count, pass `cores` to it (as above) so the core
+    sweep measures whether more workers help; a fixed count only measures memory.
     """
+    sys.path.insert(0, HERE)  # EDIT: folder that holds their modules
     from my_workflow import run  # pylint: disable=import-outside-toplevel,import-error
 
     yield
@@ -120,6 +125,20 @@ except ImportError:  # pragma: no cover - depends on the environment
     psutil = None
 
 
+def _pss_or_rss(proc):
+    """Proportional set size on Linux, else RSS (macOS has no PSS).
+
+    Forked workers share pages with their parent; summing RSS counts those pages
+    once per process, PSS splits them, so the tree total is not inflated.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            return proc.memory_full_info().pss
+        except (AttributeError, psutil.Error):
+            pass
+    return proc.memory_info().rss
+
+
 def _tree_usage(root):
     """Return (rss_bytes, cpu_seconds) summed over `root` and all descendants."""
     if psutil is not None:
@@ -131,7 +150,7 @@ def _tree_usage(root):
         rss = cpu = 0.0
         for proc in procs:
             try:
-                rss += proc.memory_info().rss
+                rss += _pss_or_rss(proc)
                 times = proc.cpu_times()
                 cpu += times.user + times.system
             except psutil.Error:
@@ -276,10 +295,25 @@ def _child(problem, cores):
         stop.set()
         sampler.join()
     seconds = time.perf_counter() - start
+    repeats = 1
+    if generator and seconds < MIN_TIMED_S:
+        # Too short to time: rerun the measured part (fresh setup each time, untimed)
+        # until ~MIN_TIMED_S of work has run, and report the time per pass.
+        total = seconds
+        while total < MIN_TIMED_S and repeats < 50:
+            again = work(cores, **problem)
+            next(again, None)
+            t_again = time.perf_counter()
+            for _ in again:
+                pass
+            total += time.perf_counter() - t_again
+            repeats += 1
+        seconds = total / repeats
     own1, kids = _maxrss()
     ticks = max(hits["ticks"], 1)
     report = {
         "work_s": seconds,
+        "repeats": repeats,
         "rss_setup": own0,
         "rss_peak": own1,
         "rss_kids": kids,
@@ -366,6 +400,7 @@ def _min_of(problem, cores=1, repeats=1):
 
 CPU_PROFILES = [("8x32", 8, 32), ("16x128", 16, 128), ("48x768", 48, 768)]
 HEADROOM = 1.3
+MIN_TIMED_S = 2.0  # short work phases are repeated until this much has run, for timing
 LAPTOP_GB = 12  # estimate x headroom at or below this fits a typical laptop
 MIN_FORMULA_GB = 0.05  # a check adding less than this after setup measures only overhead
 
@@ -427,7 +462,7 @@ def _cores_sweep(problem, notes):
     available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
     counts = sorted({1, *[c for c in CORES if c <= available]})
     if len(counts) == 1:
-        return 1, {}  # nothing to compare; skip re-running the workload
+        return None, {}  # nothing to compare; skip re-running the workload
     times = {}
     for cores in counts:
         run = _min_of(problem, cores, repeats=2)
@@ -436,10 +471,13 @@ def _cores_sweep(problem, notes):
             continue
         times[cores] = run
     if 1 not in times:
-        return 1, {}
-    if times[1]["work_s"] < 1:
-        notes.append("core sweep skipped: the work phase takes < 1 s, too short to time")
-        return 1, {}
+        return None, {}
+    if times[1]["work_s"] * times[1].get("repeats", 1) < 1:
+        notes.append(
+            "core sweep skipped: the work phase takes < 1 s, too short to time - whether more "
+            "cores help is NOT measured; use a bigger check, or compare two profiles in the cloud"
+        )
+        return None, {}
     speedup = {c: round(times[1]["work_s"] / r["work_s"], 2) for c, r in times.items()}
     helpful = max(c for c, s in speedup.items() if s / c >= 0.6)
     notes.append(f"speedup by cores (measured locally): {speedup}")
@@ -552,7 +590,12 @@ def _calibrate(checks, notes):  # pylint: disable=too-many-locals
         )
     if TIME_UNITS is not None:
         pts = [(TIME_UNITS(p), r["work_s"]) for _, p, r in good if TIME_UNITS(p) > 0]
-        timed = [pt for pt in pts if pt[1] > 0.5]  # shorter runs are mostly noise
+        reps = {id(r): r.get("repeats", 1) for _, _, r in good}
+        timed = [
+            pt
+            for pt, (_, _, r) in zip(pts, [g for g in good if TIME_UNITS(g[1]) > 0])
+            if pt[1] > 0.5 or pt[1] * reps[id(r)] >= MIN_TIMED_S * 0.9
+        ]
         if len(timed) < len(pts):
             notes.append(
                 f"{len(pts) - len(timed)} check(s) ran < 0.5 s, too short to time: make the "
@@ -591,7 +634,11 @@ def _estimate_only():
             f"{label:<5}{_fmt_gb(formula):<11}{_fmt_gb(formula * HEADROOM):<11}"
             f"{first:<20}{fallback or '-'}"
         )
-    print("the constant is a guess until a check runs; real copies/workspace often add 2-30x")
+    print(
+        "LOWER BOUND, NOT A SIZING: the constant is unmeasured, and real copies, workspace and\n"
+        "workers often add 2-30x. Run two LOCAL_CHECKS (or the s size in the cloud) before\n"
+        "choosing machines."
+    )
 
 
 def main():  # pylint: disable=too-many-locals
@@ -635,13 +682,13 @@ def main():  # pylint: disable=too-many-locals
             )
         if model["time"] is not None:
             u_ref, t_ref, exp = model["time"]
-            seconds = t_ref * (TIME_UNITS(problem) / u_ref) ** exp / speedup.get(helpful, 1)
+            seconds = t_ref * (TIME_UNITS(problem) / u_ref) ** exp / speedup.get(helpful or 1, 1)
             row["time_s"] = run["work_s"] if run and "error" not in run else seconds
             if row["time_s"] > 20 * 3600:
                 notes.append(
                     f"tier {label}: ~{_fmt_t(row['time_s'])}, near or past the 24 h job limit"
                 )
-        row["first"], row["fallback"] = _rungs(row["estimate_gb"] * HEADROOM, helpful)
+        row["first"], row["fallback"] = _rungs(row["estimate_gb"] * HEADROOM, helpful or 1)
         rows.append(row)
 
     print(
@@ -667,7 +714,8 @@ def main():  # pylint: disable=too-many-locals
                 )
                 + " (in MEMORY_GB units) - pick the problem sizes for each rung from that"
             )
-    print(f"\nrungs fit estimate x {HEADROOM} and {helpful} helpful core(s). Problems:")
+    cores_txt = f"{helpful} helpful core(s)" if helpful else "cores not measured"
+    print(f"\nrungs fit estimate x {HEADROOM} and {cores_txt}. Problems:")
     for row in rows:
         print(f"  {row['tier']}: {row['problem']}")
     if gpu is not None:

@@ -45,9 +45,11 @@ The goal is a sensible first machine per problem, not a precise prediction. The 
 
    The probe measures memory and time across the whole process tree, the cores that actually help, and how much time could move to a GPU. It fits the formula to the two checks and prints, for each problem, an estimate, a time, a starting machine and a fallback. A constant that's off by a few × is fine, because the checks correct it. If the probe says the ratio drifts or the shape is wrong, the formula missed a copy, a worker count or the dominant object; fix it before trusting the bigger problems.
 
-Present the result as the start of an experiment: "here is roughly what the bigger problems need; let's deploy and measure them on the real machines." Estimates far out tend to run high, so a problem estimated above the largest machine still gets a try on `48x768` (see Step 4).
+Expect the estimates to be off by up to ~2× in either direction until the first cloud run: the local machine is not the cloud one. On macOS in particular, processes started by a worker pool share memory, and the probe can count that memory more than once, so estimates for code with worker pools tend to run high there. Present the result as the start of an experiment: "here is roughly what the bigger problems need; let's deploy and measure them on the real machines." A problem estimated above the largest machine still gets a try on `48x768` (see Step 4).
 
 ## Step 3 — Wrap it as a function and deploy it
+
+First check that the client works in their environment: `python -c "import qiskit_ibm_catalog"` (install it with `pip install qiskit-ibm-catalog` if not).
 
 Put their code in a folder (everything in it is uploaded, max 50 MB) with one entrypoint file next to their modules:
 
@@ -86,7 +88,8 @@ def run_function(backend_name=None, **args):
     t0, c0, stages = time.perf_counter(), _cpu_s(), {}
     backend = get_runtime_service().backend(backend_name) if backend_name else None
 
-    update_status(Job.POST_PROCESSING)                # or MAPPING, WAITING_QPU, ... per stage
+    update_status(Job.POST_PROCESSING)   # pick the label per stage: MAPPING, OPTIMIZING_HARDWARE,
+                                         # WAITING_QPU, EXECUTING_QPU, POST_PROCESSING
     t = time.perf_counter()
     result = run_my_workflow(backend=backend, **args)
     stages["workflow_s"] = round(time.perf_counter() - t, 1)
@@ -109,6 +112,7 @@ if __name__ == "__main__":
 
 Keep these in mind:
 
+- **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
 - **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
 - **Log once per iteration** in long loops, with `print(..., flush=True)`. A run that's slower than expected then shows up in `job.logs()` early.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
@@ -160,11 +164,16 @@ out = job.result()
 print(out["metadata"]["resources"])   # peak_gb, wall_s, cores_used, cores_granted, stages_s
 ```
 
+Every number you report must come from a real job: quote its `job_id` and the `metadata["resources"]` it returned. If an upload, submission or result call fails, show the researcher the error and stop. Never estimate what a run would have measured, or fill in a result that wasn't returned.
+
+`cores_granted` can be more than the profile's vCPU count (for example 96 on `48x768`); it counts the hardware threads the job can be scheduled on.
+
 After each run:
 
 - **Correct the estimate.** Divide the measured `peak_gb` by the formula for that problem, and use the new ratio to re-estimate the next problem.
 - **If it ran out of memory**, retry on the fallback machine. Only if `48x768` runs out of memory too, work out with the researcher how to split or reshape the problem; *Bigger than one machine* in `sizing_guide.md` has the questions.
 - **If `cores_used` is far below `cores_granted`**, the extra cores came with the memory. That's fine, but don't climb for cores alone.
+- **To compare machines on the same problem** (CPU vs GPU, or 8 vs 16 cores), run that problem with each size label whose profile you want to compare. Add a label to `sizes_map` and re-upload under the same title if you need another profile. Re-uploading replaces `sizes_map` and leaves existing jobs alone.
 - **If run time grows faster than expected**, check the logs before submitting the next size. A 24-hour job that is 10× slower than planned should be split or extended, not resubmitted.
 
 Keep going until something stops them; that is the interesting result. Then update `sizes_map` from what the runs showed.
