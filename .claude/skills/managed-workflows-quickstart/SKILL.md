@@ -39,19 +39,15 @@ The goal is a sensible first machine per problem, not a precise prediction. The 
    - **`TIERS`**: the problems from Step 1.
    - **`MEMORY_GB`**: the formula.
    - **`TIME_UNITS`**: the relative amount of work per problem.
-   - **`LOCAL_CHECKS`**: two problem sizes ~2–4× apart in formula memory. Each should run in a few minutes. These are small stand-in sizes, not the researcher's problems: never run `m` or `l` (or exact references) locally. The point of Step 4 is to run those on the cloud.
+   - **`LOCAL_CHECKS`**: two problem sizes ~2–4× apart in formula memory. Each should run in a few minutes.
 
    Run it in their environment with the QPU mocked — never submit to real hardware while probing — and in the background if it takes a while.
 
-   The probe measures memory and time across the whole process tree, the cores that actually help, and how much time could move to a GPU. It fits the formula to the two checks and prints, for each problem, an estimate, a time, a starting machine and a fallback. Use those printed estimates, not the raw formula: they include the fixed cost of Python, imports and setup (often 0.2–1 GB), which dominates small problems. A constant that's off by a few × is fine, because the checks correct it. If the probe says the ratio drifts or the shape is wrong, the formula missed a copy, a worker count or the dominant object; fix it before trusting the bigger problems.
-
-If the checks show memory barely changing with size, the problems may not be scaling what drives cost (a cap such as a maximum subspace that stays fixed, a sample count, a bond dimension that is never reached). Revisit the problems with the researcher before deploying.
+   The probe measures memory and time across the whole process tree, the cores that actually help, and how much time could move to a GPU. It fits the formula to the two checks and prints, for each problem, an estimate, a time, a starting machine and a fallback. A constant that's off by a few × is fine, because the checks correct it. If the probe says the ratio drifts or the shape is wrong, the formula missed a copy, a worker count or the dominant object; fix it before trusting the bigger problems.
 
 Expect the estimates to be off by up to ~2× in either direction until the first cloud run: the local machine is not the cloud one. On macOS in particular, processes started by a worker pool share memory, and the probe can count that memory more than once, so estimates for code with worker pools tend to run high there. Present the result as the start of an experiment: "here is roughly what the bigger problems need; let's deploy and measure them on the real machines." A problem estimated above the largest machine still gets a try on `48x768` (see Step 4).
 
 ## Step 3 — Wrap it as a function and deploy it
-
-First check that the client works in their environment: `python -c "import qiskit_ibm_catalog"` (install it with `pip install qiskit-ibm-catalog` if not).
 
 Put their code in a folder (everything in it is uploaded, max 50 MB) with one entrypoint file next to their modules:
 
@@ -117,7 +113,7 @@ Keep these in mind:
 - **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
 - **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
 - **Log once per iteration** in long loops, with `print(..., flush=True)`. A run that's slower than expected then shows up in `job.logs()` early.
-- **Libraries that cache compiled code need a writable cache.** The image's site-packages is read-only, so numba-based code (quimb, for example) fails with "cannot cache function ... no locator available". Set `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction` (or set it in `os.environ` before the import).
+- **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
 - **If the code fans work out**, size the pool from `os.sched_getaffinity(0)`, not `os.cpu_count()`. Set `OMP_NUM_THREADS` and similar to cores ÷ workers before numpy is imported.
@@ -179,4 +175,4 @@ After each run:
 - **To compare machines on the same problem** (CPU vs GPU, or 8 vs 16 cores), run that problem with each size label whose profile you want to compare. Add a label to `sizes_map` and re-upload under the same title if you need another profile. Re-uploading replaces `sizes_map` and leaves existing jobs alone.
 - **If run time grows faster than expected**, check the logs before submitting the next size. A 24-hour job that is 10× slower than planned should be split or extended, not resubmitted.
 
-Keep going until the researcher's largest problem has run, or something stops them; that is the interesting result. If the problems they care about all measure well under 32 GB and finish in minutes, say so plainly: a laptop or `8x32` is enough, and the reason to use Managed Workflows is keeping long runs alive, not machine size. Then update `sizes_map` from what the runs showed.
+Keep going until something stops them; that is the interesting result. Then update `sizes_map` from what the runs showed.
