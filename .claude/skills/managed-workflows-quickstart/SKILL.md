@@ -112,7 +112,7 @@ Keep these in mind:
 
 - **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
 - **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
-- **Log once per iteration** in long loops, with `print(..., flush=True)`. A run that's slower than expected then shows up in `job.logs()` early.
+- **Log progress** with `print(..., flush=True)`: once per iteration in long loops, plus a timed heartbeat (a background thread printing the time and memory every few minutes) if a single step can take hours. A run that's slower than expected, or stuck, then shows up in `job.logs()` early.
 - **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
