@@ -57,47 +57,23 @@ my_workflow/
   <their modules>.py   # unchanged where possible
 ```
 
-The entrypoint imports their code, reads the arguments, reports progress, and returns a dict:
+Copy `mw_telemetry.py` from this folder into the same folder. The entrypoint imports their code, reads the arguments, wraps the run in `telemetry()`, and returns a dict:
 
 ```python
-import os, resource, sys, time, traceback
+import traceback
 from qiskit_serverless import get_arguments, save_result, update_status, Job, get_runtime_service
 
+from mw_telemetry import telemetry
 from my_module import run_my_workflow          # their code
 
 
-def _peak_gb():
-    """Peak memory of the whole job: container counter on Linux, else largest process."""
-    try:
-        with open("/sys/fs/cgroup/memory.peak", encoding="utf-8") as fh:
-            return round(int(fh.read()) / 1e9, 2)
-    except (OSError, ValueError):
-        unit = 1 if sys.platform == "darwin" else 1024
-        return round(max(resource.getrusage(r).ru_maxrss
-                         for r in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)) * unit / 1e9, 2)
-
-
-def _cpu_s():
-    return sum(resource.getrusage(r).ru_utime + resource.getrusage(r).ru_stime
-               for r in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN))
-
-
 def run_function(backend_name=None, **args):
-    t0, c0, stages = time.perf_counter(), _cpu_s(), {}
     backend = get_runtime_service().backend(backend_name) if backend_name else None
-
-    update_status(Job.POST_PROCESSING)   # pick the label per stage: MAPPING, OPTIMIZING_HARDWARE,
-                                         # WAITING_QPU, EXECUTING_QPU, POST_PROCESSING
-    t = time.perf_counter()
-    result = run_my_workflow(backend=backend, **args)
-    stages["workflow_s"] = round(time.perf_counter() - t, 1)
-
-    wall = time.perf_counter() - t0
-    return {"result": result, "metadata": {"resources": {
-        "peak_gb": _peak_gb(), "wall_s": round(wall, 1),
-        "cores_used": round((_cpu_s() - c0) / wall, 1) if wall else None,
-        "cores_granted": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count(),
-        "stages_s": stages}}}
+    with telemetry() as t:                         # peak memory, cores used, heartbeat in the logs
+        update_status(Job.POST_PROCESSING)         # pick the label per stage: MAPPING, OPTIMIZING_HARDWARE,
+        with t.stage("workflow"):                  # WAITING_QPU, EXECUTING_QPU, POST_PROCESSING
+            result = run_my_workflow(backend=backend, **args)
+    return {"result": result, "metadata": {"resources": t.summary}}
 
 
 if __name__ == "__main__":
@@ -108,11 +84,13 @@ if __name__ == "__main__":
         raise
 ```
 
+`t.summary` holds `peak_gb` (the job's own container counter on Fleets, so it includes worker processes), `wall_s`, `cores_used`, `cores_granted` and per-stage time. A heartbeat prints time and memory to `job.logs()` every five minutes. Add more `t.stage(...)` blocks to see which stage dominates. To also send the metrics to an OpenTelemetry collector, set `env_vars={"OTEL_EXPORTER_OTLP_ENDPOINT": "https://..."}` on `QiskitFunction`; the Fleets image already has the SDK.
+
 Keep these in mind:
 
 - **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
 - **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
-- **Log progress** with `print(..., flush=True)`: once per iteration in long loops, plus a timed heartbeat (a background thread printing the time and memory every few minutes) if a single step can take hours. A run that's slower than expected, or stuck, then shows up in `job.logs()` early.
+- **Log progress** with `print(..., flush=True)` (or `t.log(...)`) once per iteration in long loops. With the heartbeat, a run that's slower than expected, or stuck, shows up in `job.logs()` early.
 - **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
@@ -160,7 +138,7 @@ job = fn.run(function_size="s", **problem_s)
 print(job.job_id, job.status())       # INITIALIZING -> RUNNING: ... -> DONE (startup takes ~2-3 min)
 print(job.logs())                     # per-iteration progress
 out = job.result()
-print(out["metadata"]["resources"])   # peak_gb, wall_s, cores_used, cores_granted, stages_s
+print(out["metadata"]["resources"])   # peak_gb, wall_s, cores_used, cores_granted, stages
 ```
 
 Every number you report must come from a real job: quote its `job_id` and the `metadata["resources"]` it returned. If an upload, submission or result call fails, show the researcher the error and stop. Never estimate what a run would have measured, or fill in a result that wasn't returned.

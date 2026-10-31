@@ -117,7 +117,7 @@ Every profile is a single machine — at most 48 cores and 768 GB on CPU, or 160
 
 If a real run on the largest profile runs out of memory, work out the reshaping together. The researcher knows which parts of their method can change without changing the science; ask before proposing anything:
 
-- **Which stage is over the limit?** Use the last run's `stages_s` and the formula — often only one stage (the diagonalization, the subexperiment list, the exact reference) is the problem.
+- **Which stage is over the limit?** Use the last run's `stages` and the formula — often only one stage (the diagonalization, the subexperiment list, the exact reference) is the problem.
 - **Are there pieces that are independent?** Batches, cut subexperiments, instances, time points or parameter values can run as separate jobs.
 - **Is there an approximation they already trust?** Fewer kept samples, a truncation threshold, sampled instead of enumerated subexperiments, a sparse or iterative solver in place of a dense one.
 - **Can the run stop and resume between stages?** A stage that writes its output can be the start of the next job.
@@ -138,13 +138,13 @@ If the piece that must stay together still does not fit on the largest machine, 
 The local profile is rough by design; the deployed function is where the researcher gets real numbers. Once it is uploaded, encourage a scale-up sweep — the same incremental way they already work, just with bigger machines to climb onto:
 
 - **Start with `s` on its profile**, then take the next bigger problem on the next profile up. Keep going until something stops them; that is the interesting result.
-- **Read `metadata["resources"]` after each run** (see Step 3 of `SKILL.md`): `peak_gb`, `cores_used`, `cores_granted` and `stages_s`. Divide `peak_gb` by the formula for that problem to get a new ratio, re-estimate the next tier with it, and pick its profile from that — real numbers replace the local check one rung at a time.
+- **Read `metadata["resources"]` after each run** (see Step 3 of `SKILL.md`): `peak_gb`, `cores_used`, `cores_granted` and `stages`. Divide `peak_gb` by the formula for that problem to get a new ratio, re-estimate the next tier with it, and pick its profile from that — real numbers replace the local check one rung at a time.
 - **If a run runs out of memory, retry on the fallback** rather than reshaping anything; that is what the fallback is for.
 - **If `cores_used` is far below `cores_granted`**, the extra cores came with the memory, not because they help — that is fine, but no reason to climb for cores alone.
 - **Add comparison runs where it is unclear** — the same problem on two neighbouring profiles, or a CPU and a GPU profile — to see what more cores or a GPU actually buy.
 - **Update `sizes_map`** from what the runs showed, not from the local estimate.
 
-A useful first experiment is the same problem on two or three profiles, comparing `wall_s` and `stages_s` from each result.
+A useful first experiment is the same problem on two or three profiles, comparing `wall_s` and `stages` from each result.
 
 ## When a laptop is enough
 
