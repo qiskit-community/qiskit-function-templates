@@ -73,7 +73,9 @@ if __name__ == "__main__":
         raise
 ```
 
-`t.summary` holds `peak_gb` (the job's own container counter on Fleets, so it includes worker processes), `wall_s`, `cores_used`, `cores_granted` and per-stage time. A heartbeat prints time and memory to `job.logs()` every five minutes. Add more `t.stage(...)` blocks to see which stage dominates. To also send the metrics to an OpenTelemetry collector, set `env_vars={"OTEL_EXPORTER_OTLP_ENDPOINT": "https://..."}` on `QiskitFunction`; the Fleets image already has the SDK.
+`t.summary` holds `peak_gb` (the job's own memory counter on Managed Workflows, so it includes worker processes), `wall_s`, `cores_used`, `cores_granted` and per-stage time. A heartbeat prints time and memory to `job.logs()` every five minutes. Add more `t.stage(...)` blocks to see which stage dominates.
+
+Jobs have no outbound network, so telemetry comes back through the job itself: `t.summary` in the result, `MW_TELEMETRY` JSON lines in the logs (`parse_logs(job.logs())` reads them), and a `telemetry-<run id>.json` file in the function's storage, named in `t.summary["telemetry_file"]`. To see runs in an OpenTelemetry backend, download the file with `serverless.file_download(name, fn)` and run `python mw_telemetry.py replay <file>` on your own machine; it sends one trace per run to the collector set in the usual `OTEL_EXPORTER_OTLP_*` variables.
 
 Keep these in mind:
 
