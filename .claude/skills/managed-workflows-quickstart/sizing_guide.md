@@ -4,30 +4,29 @@ Reference for Steps 2 and 4 of `SKILL.md`. Researchers usually come with one of 
 
 ## Start from what they know
 
-Before measuring anything, ask how their algorithm scales with more cores, a GPU, and more memory. Many researchers know — from the method's paper, from earlier runs on a cluster, or from the library's documentation. If they do, use that as the formula and run the probe only to check it on their code at a small size. If they don't, work the formula out from the code together. Either way, the goal is a sensible first profile per tier, not a precise prediction.
+Before measuring anything, ask how their algorithm scales with more cores, a GPU, and more memory. Many researchers know — from the method's paper, from earlier runs on a cluster, or from the library's documentation. If they do, use that as the formula and let the small runs check it. If they don't, work the formula out from the code together. Either way, the goal is a sensible first profile per tier, not a precise prediction.
 
 ## Estimate, then check
 
 Ask what small, medium and large problems they actually want to run (labels `s`, `m`, `l`, and `xl` if needed — the service accepts no others). Each one is a whole workflow — every argument that changes cost (problem size, samples, iterations, depth), set together — and tiers differ only in size, never in method.
 
-Then size them in two moves. A formula worked out from the code gets the shape of the growth right; two small real runs get the constant right and test the shape. Neither is enough alone: eyeballed numbers come out low, and curves fitted to small runs without a formula under-read exponential growth.
+Then size them in two moves. A formula worked out from the code gets the shape of the growth right; small real runs get the constant right and test the shape. Neither is enough alone: eyeballed numbers come out low, and curves fitted to small runs without a formula under-read exponential growth.
 
-1. **Estimate from the code.** Answer the questions in **Finding what drives the cost**, write the dominant stage's memory as a formula in the tier arguments, and evaluate it for every tier by running the arithmetic — a few lines of Python — not by eye. Leave the constant rough; the checks set it.
-2. **Check it with two small runs.** Put the formula in `MEMORY_GB` in `scale_probe.py` and two problem sizes in `LOCAL_CHECKS`, ~2–4× apart in formula memory and each running in a few minutes. Make the larger one big enough that the formula outweighs imports (a check whose formula gives less than ~0.05 GB measures only overhead). The probe fits measured memory as overhead + k × formula and time as a power of `TIME_UNITS`. A k of a few is normal — copies, workspace, library overhead. Make each check take at least a few seconds, or time cannot be fitted. What matters is that the ratio holds steady between the two checks; if it drifts, the formula has the wrong shape (a missed copy, a worker count, the wrong exponent) and the larger tiers will be off by more the further out they are. Recheck the formula with the researcher before trusting them.
+1. **Estimate from the code.** Answer the questions in **Finding what drives the cost**, write the dominant stage's memory as a formula in the tier arguments, and evaluate it for every tier by running the arithmetic — a few lines of Python — not by eye. Leave the constant rough; the runs set it.
+2. **Measure small runs and fit.** Run 2–3 problems smaller than the researcher's, ~2–4× apart in formula memory, as jobs on Managed Workflows (Step 4 of `SKILL.md`), and fit them with `scale_probe.py`. It fits memory as overhead + k × formula and time as a power of `TIME_UNITS`. A k of a few is normal — copies, workspace, library overhead. With three or more sizes it also tests the shape: a middle run far off the fitted line means the formula has a missed copy, a worker count or the wrong exponent, and the larger tiers will be off by more the further out they are. Recheck the formula with the researcher before trusting them.
 
-How the check run is measured:
+What to get right in the small runs:
 
-- **Setup is not counted.** Write `work` as a generator: do imports and one-time preparation, `yield`, then the work to be measured. Otherwise import time and JIT compilation hide the real work.
-- **The whole process tree is measured.** Memory and CPU time are summed over the run and every process it starts, so worker pools, MPI ranks and compiled solvers (C++, Fortran, Julia) count. The CPU time also shows how many cores the run really used, and a short core sweep shows which counts help.
-- **Failures are results.** A check that runs out of memory or time locally is reported with the reason. That is often why the researcher came, and it is the tier most worth running on a bigger machine.
-- **Mock the QPU.** Use a fake backend, cached counts or fixed parameters. Never submit to real hardware while probing.
-- **Time iterations, not whole runs, for optimizer loops** (AQC, QAOA, VQE). Have `work` set up and warm up the objective before the `yield`, then run a few iterations after it, and make `TIME_UNITS` count iterations × cost per iteration so the probe can scale the time to each tier.
-- **Watch for libraries that cap their own memory.** Some solvers limit their working memory to a default (often a few GB) and trade the rest for time — the check runs then look memory-flat and slower than expected. If memory stops growing between checks while time grows faster, look for a max-memory setting, raise it for the checks, and set it to the profile's memory in the deployed function.
+- **Make each one big enough.** It should add memory well beyond imports (a run whose formula gives less than ~0.05 GB measures only overhead) and run for at least a few seconds, or time cannot be fitted.
+- **Scale down along every argument that changes cost**, not just one: an object that depends on an argument you held fixed will not show up in the fit.
+- **Mock the QPU.** Use a fake backend, cached counts or fixed parameters. Never submit to real hardware while sizing.
+- **Time iterations, not whole runs, for optimizer loops** (AQC, QAOA, VQE). Run a few iterations, and make `TIME_UNITS` count iterations × cost per iteration so the fit can scale the time to each tier.
+- **Watch for libraries that cap their own memory.** Some solvers limit their working memory to a default (often a few GB) and trade the rest for time — the runs then look memory-flat and slower than expected. If memory stops growing between runs while time grows faster, look for a max-memory setting and set it to the profile's memory.
 - **Leave exact checks out.** A full FCI reference, an exact-unitary comparison or an exhaustive enumeration usually grows faster than the method and becomes the largest cost at research scale. Measure the method with them switched off, and size them separately if the researcher wants them.
 
-For each tier the probe prints the formula value, the fitted estimate, a rough time if `TIME_UNITS` is set, and a first profile plus a fallback: the smallest CPU profile that covers estimate × 1.3 and the helpful cores, and the next one up. Present these as a starting point to climb from, not a verdict.
+For each tier the fit prints the formula value, the fitted estimate, a rough time if `TIME_UNITS` is set, and a first profile plus a fallback: the smallest CPU profile that covers estimate × 1.3, and the next one up. Present these as a starting point to climb from, not a verdict.
 
-Standard tools can cross-check or explain the probe's numbers when they are already installed; none is required. `memray run --native --follow-fork` followed by `memray stats --json` shows *which* allocation dominates the peak — useful when the formula is off. `py-spy record --subprocesses --idle --format raw` gives sampled stacks across workers (on macOS it needs sudo). On Linux, `systemd-run --user --scope -p MemoryAccounting=yes` then reading `memory.peak` gives the true peak of the whole process tree, and `/usr/bin/time -v` (`-l` on macOS) gives CPU time and the largest single process. For making the code faster rather than sizing it, point the researcher to Scalene.
+Standard tools can explain what dominates memory when they are already installed; none is required. `memray run --native --follow-fork` followed by `memray stats --json` shows *which* allocation dominates the peak — useful when the formula is off. `py-spy record --subprocesses --idle --format raw` gives sampled stacks across workers (on macOS it needs sudo). On Linux, `systemd-run --user --scope -p MemoryAccounting=yes` then reading `memory.peak` gives the true peak of the whole process tree, and `/usr/bin/time -v` (`-l` on macOS) gives CPU time and the largest single process. For making the code faster rather than sizing it, point the researcher to Scalene.
 
 ## Rough memory formulas
 
@@ -69,7 +68,7 @@ These answers give `MEMORY_GB`, `TIME_UNITS` and so each tier's first profile.
 
 ### Common families at a glance
 
-Starting points only — confirm against the researcher's code and the check runs.
+Starting points only — confirm against the researcher's code and the measured runs.
 
 | Family | Usually binds | Driver | Memory shape | Watch for |
 |---|---|---|---|---|
@@ -88,14 +87,14 @@ For a workflow not in the table, answer the four questions above and pick the cl
 
 ## Would a GPU help?
 
-`scale_probe.py` samples the call stack during the check run and reports the share of time spent in libraries that have a GPU version. That share caps the gain: if 60% of the time is portable, even an infinitely fast GPU gives at most 1 / 0.4 = 2.5×. A GPU is a good default for a tier when all of the following hold. When only some do — a smaller stage would run on a GPU but the stage that dominates at the largest tier would not — keep the tier on a CPU profile and add a GPU run to the sweep as a comparison (for example, `m` on both `16x128` and `24x120x1l40`). The sweep shows whether it pays off; that is an experiment worth running, not a reason to skip GPUs.
+The share of time spent in a stage that has a GPU version caps the gain (per-stage times from `mw_telemetry` show it): if 60% of the time is portable, even an infinitely fast GPU gives at most 1 / 0.4 = 2.5×. A GPU is a good default for a tier when all of the following hold. When only some do — a smaller stage would run on a GPU but the stage that dominates at the largest tier would not — keep the tier on a CPU profile and add a GPU run to the sweep as a comparison (for example, `m` on both `16x128` and `24x120x1l40`). The sweep shows whether it pays off; that is an experiment worth running, not a reason to skip GPUs.
 
-- **The share is high, and the GPU-portable stage is the one that grows** — at least ~0.6 on the check run, and the stage that dominates at the largest tier (from the formula) is that same stage.
+- **The share is high, and the GPU-portable stage is the one that grows** — at least ~0.6 of the run, and the stage that dominates at the largest tier (from the formula) is that same stage.
 - **The dominant stage has a GPU path** — dense linear algebra, large tensor contractions, mean-field chemistry and full-state simulation usually have one (often as a separate GPU build of the same library). Combinatorial and bit-string-heavy code, selected-CI solvers, configuration recovery, approximate-state simulators, transpilation and plain Python loops usually do not — for those, more cores or memory are what help. Check the library's documentation rather than assuming.
 - **The arrays are large** — dense matrices around 2000×2000 or more, or big contractions. Small arrays run slower on a GPU because of transfer overhead.
 - **The working set fits in one GPU** — 80 GB on an A100 or H100. Libraries use a single GPU unless the code shards explicitly, so a profile with several GPUs only helps code written to use them.
 
-The probe cannot see inside compiled code: compute in Aer's C++ threads, in a subprocess, or in `@`/`np.dot` written directly in the researcher's code is reported as not portable or "n/a (compute outside Python)". In those cases decide from the library and the array sizes instead.
+Decide which stage is GPU-portable from the library and the array sizes, not from the stage name.
 
 For example: *"most of the time is in a library with a GPU version and that share rises with size, so a GPU could help — compare one run on a GPU profile against a CPU run of the same problem before making it a tier's default."*
 
