@@ -123,7 +123,7 @@ If a real run on the largest profile runs out of memory, work out the reshaping 
 
 Whatever they choose, check the reshaped version against a size that still fits in one piece, then keep climbing.
 
-Splitting into jobs uses the function's user storage. Every job of the function can read and write it at `/function_user_data` inside a Fleets job (job-only scratch lives in `/job_user_data`), and the notebook reaches it with `serverless.file_upload`, `files` and `file_download`. Independent pieces can run as separate jobs that write their results there and combine them at the end:
+Splitting into jobs uses the function's user storage. Every job of the function can read and write it at `/function_user_data` inside a job (job-only scratch lives in `/job_user_data`), and the notebook reaches it with `serverless.file_upload`, `files` and `file_download`. Independent pieces can run as separate jobs that write their results there and combine them at the end:
 
 - **SQD batches** — one job per batch or group of batches, writing each batch's energy and occupancies; a final job (or the notebook) combines them.
 - **Circuit-cutting subexperiments** — generate once, run the subexperiments in parallel jobs, reconstruct at the end.
