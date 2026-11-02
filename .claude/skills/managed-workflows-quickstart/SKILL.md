@@ -29,23 +29,12 @@ Watch for:
 
 If it fits locally and finishes in a few minutes, say so. A laptop is fine for that.
 
-## Step 2 — Rough sizing
+## Step 2 — Write the formula, and check the code runs
 
-The goal is a sensible first machine per problem, not a precise prediction. The real measurement comes from the cloud runs in Step 4.
+Sizing is measured on Managed Workflows in Step 4, from small real jobs. Locally, you need two things first.
 
-1. **Estimate from the code.** Find the stage that dominates and the largest objects it holds at its peak. Write a memory formula in the problem arguments; `sizing_guide.md` shows the common shapes and how to count copies and workers. Evaluate it for every problem by running it: `python scale_probe.py --estimate` does this even when the code can't run locally. Quote the printed numbers, and never work estimates or machine choices out in prose.
-2. **Check it with two small runs.** Copy `scale_probe.py` from this folder next to their code and edit its top block:
-   - **`work`**: a generator that `yield`s after setup, so imports and one-time preparation aren't counted. It must call the researcher's real code, never a stand-in written to imitate it.
-   - **`TIERS`**: the problems from Step 1.
-   - **`MEMORY_GB`**: the formula.
-   - **`TIME_UNITS`**: the relative amount of work per problem.
-   - **`LOCAL_CHECKS`**: two problem sizes ~2–4× apart in formula memory. Each should run in a few minutes.
-
-   Run it in their environment with the QPU mocked — never submit to real hardware while probing — and in the background if it takes a while.
-
-   The probe measures memory and time across the whole process tree, the cores that actually help, and how much time could move to a GPU. It fits the formula to the two checks and prints, for each problem, an estimate, a time, a starting machine and a fallback. A constant that's off by a few × is fine, because the checks correct it. If the probe says the ratio drifts or the shape is wrong, the formula missed a copy, a worker count or the dominant object; fix it before trusting the bigger problems.
-
-Expect the estimates to be off by up to ~2× in either direction until the first cloud run: the local machine is not the cloud one. On macOS in particular, processes started by a worker pool share memory, and the probe can count that memory more than once, so estimates for code with worker pools tend to run high there. Present the result as the start of an experiment: "here is roughly what the bigger problems need; let's deploy and measure them on the real machines." A problem estimated above the largest machine still gets a try on `48x768` (see Step 4).
+1. **A memory formula.** Find the stage that dominates and the largest objects it holds at its peak, and write their size as a formula in the problem arguments. `sizing_guide.md` shows the common shapes and how to count copies and workers. The formula supplies the *shape* of the growth; the measured runs supply the constant, so leave it rough. Copy `scale_probe.py` from this folder next to their code and put the formula in `MEMORY_GB`. Put the problems from Step 1 in `TIERS`, and optionally the relative amount of work in `TIME_UNITS`. `python scale_probe.py --estimate` evaluates the formula for every problem; treat it as a lower bound, not a sizing. Quote the printed numbers, and never work estimates or machine choices out in prose.
+2. **The code runs.** Point `work` at their real code, never a stand-in written to imitate it, and run `python scale_probe.py --check s` on the smallest problem with the QPU mocked. Never submit to real hardware here. This catches import errors and wrong arguments before anything is uploaded, and records the run in `runs.json`. If the researcher's largest problem also finishes in a few minutes within a few GB, a laptop is enough. Say so, and stop.
 
 ## Step 3 — Wrap it as a function and deploy it
 
@@ -57,47 +46,24 @@ my_workflow/
   <their modules>.py   # unchanged where possible
 ```
 
-The entrypoint imports their code, reads the arguments, reports progress, and returns a dict:
+Copy `mw_telemetry.py` from this folder into the same folder. The entrypoint imports their code, reads the arguments, wraps the run in `telemetry()`, and returns a dict:
 
 ```python
-import os, resource, sys, time, traceback
+import traceback
 from qiskit_serverless import get_arguments, save_result, update_status, Job, get_runtime_service
 
+from mw_telemetry import telemetry
 from my_module import run_my_workflow          # their code
 
 
-def _peak_gb():
-    """Peak memory of the whole job: container counter on Linux, else largest process."""
-    try:
-        with open("/sys/fs/cgroup/memory.peak", encoding="utf-8") as fh:
-            return round(int(fh.read()) / 1e9, 2)
-    except (OSError, ValueError):
-        unit = 1 if sys.platform == "darwin" else 1024
-        return round(max(resource.getrusage(r).ru_maxrss
-                         for r in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)) * unit / 1e9, 2)
-
-
-def _cpu_s():
-    return sum(resource.getrusage(r).ru_utime + resource.getrusage(r).ru_stime
-               for r in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN))
-
-
-def run_function(backend_name=None, **args):
-    t0, c0, stages = time.perf_counter(), _cpu_s(), {}
+def run_function(backend_name=None, alloc_check=None, **args):
     backend = get_runtime_service().backend(backend_name) if backend_name else None
-
-    update_status(Job.POST_PROCESSING)   # pick the label per stage: MAPPING, OPTIMIZING_HARDWARE,
-                                         # WAITING_QPU, EXECUTING_QPU, POST_PROCESSING
-    t = time.perf_counter()
-    result = run_my_workflow(backend=backend, **args)
-    stages["workflow_s"] = round(time.perf_counter() - t, 1)
-
-    wall = time.perf_counter() - t0
-    return {"result": result, "metadata": {"resources": {
-        "peak_gb": _peak_gb(), "wall_s": round(wall, 1),
-        "cores_used": round((_cpu_s() - c0) / wall, 1) if wall else None,
-        "cores_granted": len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count(),
-        "stages_s": stages}}}
+    result = None
+    with telemetry(alloc_check=alloc_check) as t:  # peak memory, cores used, heartbeat in the logs
+        update_status(Job.POST_PROCESSING)         # pick the label per stage: MAPPING, OPTIMIZING_HARDWARE,
+        with t.stage("workflow"):                  # WAITING_QPU, EXECUTING_QPU, POST_PROCESSING
+            result = run_my_workflow(backend=backend, **args)
+    return {"result": result, "metadata": {"resources": t.summary}}
 
 
 if __name__ == "__main__":
@@ -108,11 +74,15 @@ if __name__ == "__main__":
         raise
 ```
 
+`t.summary` holds `peak_gb` (the job's own memory counter on Managed Workflows, so it includes worker processes), `start_gb`, `wall_s`, `cores_used`, `cores_granted` and per-stage time. `alloc_check` is only set by `mw_sweep.py --target` (Step 4); leave it in. A heartbeat prints time and memory to `job.logs()` every five minutes. Add more `t.stage(...)` blocks to see which stage dominates.
+
+Jobs have no outbound network, so telemetry comes back through the job itself: `t.summary` in the result, `MW_TELEMETRY` JSON lines in the logs (`parse_logs(job.logs())` reads them), and a `telemetry-<run id>.json` file in the function's storage, named in `t.summary["telemetry_file"]`. To see runs in an OpenTelemetry backend, download the file with `serverless.file_download(name, fn)` and run `python mw_telemetry.py replay <file>` on your own machine; it sends one trace per run to the collector set in the usual `OTEL_EXPORTER_OTLP_*` variables.
+
 Keep these in mind:
 
 - **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
 - **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
-- **Log progress** with `print(..., flush=True)`: once per iteration in long loops, plus a timed heartbeat (a background thread printing the time and memory every few minutes) if a single step can take hours. A run that's slower than expected, or stuck, then shows up in `job.logs()` early.
+- **Log progress** with `print(..., flush=True)` (or `t.log(...)`) once per iteration in long loops. With the heartbeat, a run that's slower than expected, or stuck, shows up in `job.logs()` early.
 - **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
@@ -131,7 +101,7 @@ fn = QiskitFunction(
     entrypoint="entrypoint.py",
     working_dir="./my_workflow/",
     runner="fleets",
-    sizes_map={"s": "8x32", "m": "16x128", "l": "48x768"},    # from the probe
+    sizes_map={"s": "8x32", "m": "16x128", "l": "48x768"},    # from the fit in Step 4
     default_size="s",
     dependencies=["qiskit-aer==0.17.2"],                       # extra packages, pinned
 )
@@ -151,28 +121,41 @@ Profiles available today:
 
 A profile that isn't registered is rejected at upload with an error naming it. Use a GPU profile only if *Would a GPU help?* in `sizing_guide.md` says so. Otherwise add a GPU run as a comparison in Step 4.
 
-## Step 4 — Run it and climb
+## Step 4 — Measure, then climb
 
-Start with the smallest problem, then scale up one step at a time, using each run's real numbers to pick the next machine:
+Copy `mw_sweep.py` next to `scale_probe.py` and set `ACCOUNT`, `FUNCTION` and, if needed, `BASE` and `SWEEP_ARGS` in its edit block. It submits the jobs, waits for them, collects `metadata["resources"]` into `runs.json` with each `job_id`, and fits with `scale_probe.py`. Run it from the researcher's machine; job startup takes ~2–3 min.
 
-```python
-job = fn.run(function_size="s", **problem_s)
-print(job.job_id, job.status())       # INITIALIZING -> RUNNING: ... -> DONE (startup takes ~2-3 min)
-print(job.logs())                     # per-iteration progress
-out = job.result()
-print(out["metadata"]["resources"])   # peak_gb, wall_s, cores_used, cores_granted, stages_s
+**Measure small sizes first.**
+
+```
+python mw_sweep.py sweep
 ```
 
-Every number you report must come from a real job: quote its `job_id` and the `metadata["resources"]` it returned. If an upload, submission or result call fails, show the researcher the error and stop. Never estimate what a run would have measured, or fill in a result that wasn't returned.
+It starts from `BASE` (default: the smallest tier) and shrinks one argument at a time to ~¼ and ~½ of its formula memory, so every argument in `SWEEP_ARGS` gets its own small runs. All jobs go to `SWEEP_SIZE` at once. An argument the formula ignores is halved anyway, so a missing argument shows up. Check `BASE` fits `SWEEP_SIZE` (or set it smaller); each run should add memory well beyond imports and run for a few seconds or more.
 
-`cores_granted` can be more than the profile's vCPU count (for example 96 on `48x768`); it counts the hardware threads the job can be scheduled on.
+It prints an estimate, a time, a starting machine and a fallback for every tier, then two checks:
 
-After each run:
+- **Shape, per argument.** Along each argument, measured memory growth is compared with the formula's: "SHAPE WRONG along `norb` … grows 3× faster" means the formula weights that argument wrongly or misses an object that depends on it; memory that stays flat while the formula grows means the peak comes from something the formula leaves out. Fix `MEMORY_GB` with the researcher and run `python mw_sweep.py fit` before trusting larger tiers.
+- **Cores.** If the largest run used far fewer cores than it was granted, pick machines for memory only; `cores_granted` can exceed the profile's vCPU count (96 on `48x768`). If it kept the cores busy, it suggests `python mw_sweep.py compare m 8x32 16x128`: the same tier on both machines at once, reporting the speedup for the extra cores and whether memory grew with them (worker pools sized from the core count use more memory on a bigger machine). Climb for cores only if it says so.
 
-- **Correct the estimate.** Divide the measured `peak_gb` by the formula for that problem, and use the new ratio to re-estimate the next problem.
-- **If it ran out of memory**, retry on the fallback machine. Only if `48x768` runs out of memory too, work out with the researcher how to split or reshape the problem; *Bigger than one machine* in `sizing_guide.md` has the questions.
-- **If `cores_used` is far below `cores_granted`**, the extra cores came with the memory. That's fine, but don't climb for cores alone.
-- **To compare machines on the same problem** (CPU vs GPU, or 8 vs 16 cores), run that problem with each size label whose profile you want to compare. Add a label to `sizes_map` and re-upload under the same title if you need another profile. Re-uploading replaces `sizes_map` and leaves existing jobs alone.
-- **If run time grows faster than expected**, check the logs before submitting the next size. A 24-hour job that is 10× slower than planned should be split or extended, not resubmitted.
+**Optionally, check the research size directly.** `python mw_sweep.py --target l` runs tier `l` as a job on the smallest machine with an allocation check: the first numpy array above `--cap-gb` (default 4) is recorded with its shape, size and code line, and not allocated. It takes about as long as the setup before the big array. It answers "which object dominates at research size" in minutes, and gives a lower bound on the peak: arrays created outside numpy's `zeros`/`empty`/`ones`/`full`, or several large arrays alive at once, are not counted. Use the result to check the formula; size from the fit. Never run it locally: below-cap arrays are still allocated.
 
-Keep going until something stops them; that is the interesting result. Then update `sizes_map` from what the runs showed.
+**Then climb.**
+
+```
+python mw_sweep.py climb m l
+```
+
+It runs each tier on the machine the fit suggests, smallest first, adds each result to `runs.json` and refits before the next. A problem estimated above the largest machine still gets a try on `48x768`: estimates far out are crude and often high. On failure:
+
+- **numpy `Unable to allocate X`**: X is read from the error, machines too small for it are skipped, and if X is above 768 GB it says so. Then work out with the researcher how to split or reshape the problem; *Bigger than one machine* in `sizing_guide.md` has the questions.
+- **Killed with no traceback** (the machine ran out of memory): one retry on the next machine up, with the last heartbeat shown.
+- **Any other error**: it stops and prints the traceback. Fix it with the researcher; never resubmit it unchanged.
+
+`--from 16x128` starts the first tier on a given machine. Each profile it uses needs a size label in `sizes_map`; add one and re-upload under the same title if needed (existing jobs are unaffected).
+
+Every number you report must come from a real job: quote its `job_id` and the `metadata["resources"]` it returned, as `mw_sweep.py` prints them. If an upload or submission fails, show the researcher the error and stop. Never estimate what a run would have measured, or fill in a result that wasn't returned.
+
+If run time grows faster than expected, check the heartbeat in `job.logs()` before the next size. A 24-hour job that is 10× slower than planned should be split or extended, not resubmitted.
+
+Keep going until something stops them; that is the interesting result. Then update `sizes_map` from what the runs showed, and keep `runs.json` with their code.

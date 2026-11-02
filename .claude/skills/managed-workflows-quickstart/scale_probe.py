@@ -10,61 +10,44 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Check a memory formula against a local run and pick a first machine per tier.
+"""Fit a workflow's memory and time from measured runs, and pick a machine per tier.
 
-Copy this file next to the research code, edit the block below, and run it with
-the workflow's own Python environment (in the background if it takes a while)::
+Copy this file next to the research code and edit the block below. Three modes::
 
-    python scale_probe.py > probe.log 2>&1 &
+    python scale_probe.py --estimate        # formula only, nothing runs (a lower bound)
+    python scale_probe.py --check s         # run tier s once locally: does it run, and how big
+    python scale_probe.py runs.json         # fit measured runs and size every tier
 
-If the code cannot run locally, ``python scale_probe.py --estimate`` evaluates the
-formula for every tier without running anything.
+``runs.json`` is a list of ``{"problem": {...}, "resources": {...}}`` entries, where
+``resources`` is the ``metadata["resources"]`` that ``mw_telemetry`` returns. The
+runs normally come from small jobs on Managed Workflows (Step 3 of SKILL.md), so
+they are measured on the same machines, libraries and memory accounting as the
+real runs; ``--check`` appends its local run to the same file.
 
-It runs the small problems in ``LOCAL_CHECKS`` for real, measuring memory and
-CPU over the whole process tree (worker pools and compiled solvers count). It
-fits measured memory as overhead + k x ``MEMORY_GB`` (one check gives k; two
-give the overhead too and test how memory grows), applies that to every tier,
-and suggests a starting profile plus a fallback. The formula supplies the
-shape, the checks supply the constant, and the cloud runs are the real
-measurement. Standard library only
-(uses ``psutil`` if installed). Never contacts a QPU.
+The fit is ``peak = overhead + k * MEMORY_GB(problem)`` for memory and
+``time = t0 * (TIME_UNITS / u0) ** a`` for time. The formula gives the shape, the
+runs give the constants, and two or more runs at different sizes test the shape.
+Standard library only (``mw_telemetry`` uses ``psutil`` if installed).
 """
-
-# pylint: disable=too-many-lines,not-callable
 
 import json
 import math
 import os
-import resource
-import subprocess
 import sys
-import threading
-import time
-import types
 
 # ============================ EDIT THIS BLOCK ============================
 
 
-def work(cores, **problem):  # pylint: disable=unused-argument
-    """EDIT: run THEIR workflow (QPU mocked) on one problem - import and call the
-    researcher's own functions; never write a stand-in that imitates them.
+def work(**problem):
+    """EDIT: run THEIR workflow (QPU mocked) on one problem, for --check.
 
-    Make it a generator so one-time setup is not measured::
-
-        sys.path.insert(0, "/path/to/their/code")   # where their modules live
-        from my_workflow import build, solve        # setup
-        h = build(**problem)
-        yield                                       # everything after this is measured
-        solve(h, n_workers=cores)                   # tie any worker/pool count to `cores`
-
-    If their code takes a worker count, pass `cores` to it (as above) so the core
-    sweep measures whether more workers help; a fixed count only measures memory.
+    Import and call the researcher's own functions; never a stand-in that imitates
+    them. Use the same entrypoint code the cloud jobs run, if there is one.
     """
     sys.path.insert(0, HERE)  # EDIT: folder that holds their modules
     from my_workflow import run  # pylint: disable=import-outside-toplevel,import-error
 
-    yield
-    run(**problem)
+    return run(**problem)
 
 
 TIERS = {  # labels must be s, m, l or xl; the problems the researcher wants to run
@@ -78,331 +61,23 @@ def MEMORY_GB(p):  # pylint: disable=invalid-name
     """EDIT: rough GB of the biggest object(s) for problem p - the shape, not the constant.
 
     Count what is alive at the peak and what multiplies it (sizing_guide.md). The
-    check runs measure the constant, so leave copies and workspace rough.
+    measured runs set the constant, so leave copies and workspace rough.
     """
     # e.g. each worker holds a dense n x n matrix plus n_vectors work vectors
     return p["workers"] * 8 * (p["n"] ** 2 + p["n_vectors"] * p["n"]) / 1e9
 
 
-TIME_UNITS = (
-    None  # optional: lambda p: relative amount of work, e.g. p["max_iterations"] * 4 ** p["n"]
-)
-LOCAL_CHECKS = ["s"]  # 2 sizes, ~2-4x apart, each < a few minutes: tier labels or problem dicts
-CORES = [1, 2, 4, 8]  # 1 is always included; values above this machine's cores are skipped
-TIMEOUT_S = 300  # per run
+TIME_UNITS = None  # optional: lambda p: relative amount of work, e.g. p["iterations"] * p["n"] ** 3
 
 # ========================= machinery below this line =========================
+# pylint: disable=not-callable
 
 VALID_LABELS = ("S", "M", "L", "XL")
-THREAD_VARS = (
-    "OMP_NUM_THREADS",
-    "OPENBLAS_NUM_THREADS",
-    "MKL_NUM_THREADS",
-    "VECLIB_MAXIMUM_THREADS",
-    "NUMEXPR_NUM_THREADS",
-    "RAYON_NUM_THREADS",
-)
-GPU_LIBS = (
-    "/numpy/linalg/",
-    "/scipy/linalg/",
-    "einsumfunc",
-    "/pyscf/scf/",
-    "/pyscf/dft/",
-    "/pyscf/df/",
-    "/quimb/",
-    "/cotengra/",
-    "/opt_einsum/",
-    "/cupy/",
-    "/torch/",
-)
-AER = "/qiskit_aer/"
-MARK = "@@SCALE_PROBE@@"
 HERE = os.path.dirname(os.path.abspath(__file__))
-
-try:
-    import psutil  # pylint: disable=import-error
-except ImportError:  # pragma: no cover - depends on the environment
-    psutil = None
-
-
-def _pss_or_rss(proc):
-    """Proportional set size on Linux, else RSS (macOS has no PSS).
-
-    Forked workers share pages with their parent; summing RSS counts those pages
-    once per process, PSS splits them, so the tree total is not inflated.
-    """
-    if sys.platform.startswith("linux"):
-        try:
-            return proc.memory_full_info().pss
-        except (AttributeError, psutil.Error):
-            pass
-    return proc.memory_info().rss
-
-
-def _tree_usage(root):
-    """Return (rss_bytes, cpu_seconds) summed over `root` and all descendants."""
-    if psutil is not None:
-        try:
-            procs = [psutil.Process(root)]
-            procs += procs[0].children(recursive=True)
-        except psutil.Error:
-            return None
-        rss = cpu = 0.0
-        for proc in procs:
-            try:
-                rss += _pss_or_rss(proc)
-                times = proc.cpu_times()
-                cpu += times.user + times.system
-            except psutil.Error:
-                pass
-        return rss, cpu
-    try:
-        out = subprocess.run(
-            ["ps", "-A", "-o", "pid=,ppid=,rss=,time="],
-            capture_output=True,
-            text=True,
-            check=False,
-        ).stdout
-    except OSError:
-        return None
-    rows, kids = {}, {}
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) < 4 or not parts[0].isdigit():
-            continue
-        pid, ppid = int(parts[0]), int(parts[1])
-        rows[pid] = (int(parts[2]) * 1024, _ps_time(parts[3]))
-        kids.setdefault(ppid, []).append(pid)
-    if root not in rows:
-        return None
-    rss = cpu = 0.0
-    stack = [root]
-    while stack:
-        pid = stack.pop()
-        if pid in rows:
-            rss += rows[pid][0]
-            cpu += rows[pid][1]
-        stack.extend(kids.get(pid, ()))
-    return rss, cpu
-
-
-def _ps_time(text):
-    """Parse ps cumulative CPU time ([dd-]hh:mm:ss[.ff] or mm:ss.ff) to seconds."""
-    days = 0
-    if "-" in text:
-        day, text = text.split("-", 1)
-        days = int(day)
-    total = 0.0
-    for part in text.split(":"):
-        total = total * 60 + float(part)
-    return days * 86400 + total
-
-
-class _Sampler(threading.Thread):
-    """Poll a child's process tree; track peak RSS and CPU time per phase."""
-
-    def __init__(self, pid, every=0.01):
-        super().__init__(daemon=True)
-        self.pid, self.every = pid, every
-        self.stop_flag = threading.Event()
-        self.lock = threading.Lock()
-        self.phase = "setup"
-        self.floor = 0.0
-        self.peak = 0.0
-        self.cpu_start = self.cpu_last = 0.0
-        self.t_start = time.perf_counter()
-
-    def mark_work(self):
-        """Child reached the `yield`: reset the floor and CPU baseline."""
-        with self.lock:
-            self.phase = "work"
-            self.floor = self.peak
-            self.cpu_start = self.cpu_last
-            self.t_start = time.perf_counter()
-
-    def run(self):
-        while not self.stop_flag.wait(self.every):
-            usage = _tree_usage(self.pid)
-            if usage is None:
-                continue
-            with self.lock:
-                self.peak = max(self.peak, usage[0])
-                self.cpu_last = max(self.cpu_last, usage[1])
-
-    def result(self):
-        """Peak RSS (bytes), RSS added after setup, and CPU and wall seconds of the work phase."""
-        with self.lock:
-            wall = time.perf_counter() - self.t_start
-            return {
-                "peak": self.peak,
-                "added": max(self.peak - self.floor, 0.0),
-                "cpu": max(self.cpu_last - self.cpu_start, 0.0),
-                "wall": wall,
-                "had_setup": self.phase == "work",
-            }
-
-
-def _gpu_sampler(stop, hits, every=0.002):
-    """Count, per tick, whether any Python thread is inside a GPU-portable library."""
-    me = threading.get_ident()
-    while not stop.wait(every):
-        frames = sys._current_frames()  # pylint: disable=protected-access
-        portable = aer = busy = False
-        for ident, frame in frames.items():
-            if ident == me:
-                continue
-            files = []
-            while frame is not None:
-                files.append(frame.f_code.co_filename)
-                frame = frame.f_back
-            if any(lib in path for path in files for lib in GPU_LIBS):
-                portable = True
-            if any(AER in path for path in files):
-                aer = True
-            busy = busy or bool(files)
-        hits["ticks"] += 1
-        hits["portable"] += portable
-        hits["aer"] += aer
-        hits["busy"] += busy
-
-
-def _maxrss():
-    """Exact peak RSS (bytes) of this process and of its largest reaped child."""
-    unit = 1 if sys.platform == "darwin" else 1024  # macOS reports bytes, Linux KiB
-    own = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * unit
-    kids = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * unit
-    return own, kids
-
-
-def _child(problem, cores):
-    """Run `work` once in this process and report timings; parent measures memory."""
-    hits = {"ticks": 0, "portable": 0, "aer": 0, "busy": 0}
-    stop = threading.Event()
-    result = work(cores, **problem)
-    generator = isinstance(result, types.GeneratorType)
-    if generator:
-        next(result, None)  # run setup up to the yield
-    own0, _ = _maxrss()
-    print(MARK + "work", flush=True)
-    sampler = threading.Thread(target=_gpu_sampler, args=(stop, hits), daemon=True)
-    sampler.start()
-    start = time.perf_counter()
-    try:
-        if generator:
-            for _ in result:
-                pass
-    finally:
-        stop.set()
-        sampler.join()
-    seconds = time.perf_counter() - start
-    repeats = 1
-    if generator and seconds < MIN_TIMED_S:
-        # Too short to time: rerun the measured part (fresh setup each time, untimed)
-        # until ~MIN_TIMED_S of work has run, and report the time per pass.
-        total = seconds
-        while total < MIN_TIMED_S and repeats < 50:
-            again = work(cores, **problem)
-            next(again, None)
-            t_again = time.perf_counter()
-            for _ in again:
-                pass
-            total += time.perf_counter() - t_again
-            repeats += 1
-        seconds = total / repeats
-    own1, kids = _maxrss()
-    ticks = max(hits["ticks"], 1)
-    report = {
-        "work_s": seconds,
-        "repeats": repeats,
-        "rss_setup": own0,
-        "rss_peak": own1,
-        "rss_kids": kids,
-        "generator": generator,
-        "gpu_share": round(hits["portable"] / ticks, 2) if hits["ticks"] >= 10 else None,
-        "aer_share": round(hits["aer"] / ticks, 2) if hits["ticks"] >= 10 else None,
-    }
-    print(MARK + "done" + json.dumps(report), flush=True)
-
-
-def _run_once(problem, cores=1):
-    """Run one problem in a fresh process; return measurements or {'error': ...}."""
-    env = dict(os.environ, MW_PROFILE_CORES=str(cores))
-    env.update({var: str(cores) for var in THREAD_VARS})
-    cmd = [sys.executable, os.path.abspath(__file__), "--child", json.dumps(problem), str(cores)]
-    with subprocess.Popen(
-        cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-    ) as proc:
-        sampler = _Sampler(proc.pid)
-        sampler.start()
-        report, stdout_tail, deadline = None, [], time.monotonic() + TIMEOUT_S
-        err_thread_out = []
-        err_thread = threading.Thread(
-            target=lambda: err_thread_out.append(proc.stderr.read()), daemon=True
-        )
-        err_thread.start()
-        timed_out = False
-        for line in proc.stdout:
-            if line.startswith(MARK + "work"):
-                sampler.mark_work()
-            elif line.startswith(MARK + "done"):
-                report = json.loads(line[len(MARK) + 4 :])
-            else:
-                stdout_tail = (stdout_tail + [line.rstrip()])[-3:]
-            if time.monotonic() > deadline:
-                timed_out = True
-                break
-        if timed_out:
-            proc.kill()
-        try:
-            proc.wait(timeout=max(1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            proc.kill()
-            proc.wait()
-        sampler.stop_flag.set()
-        sampler.join()
-        err_thread.join(timeout=2)
-    usage = sampler.result()
-    stderr = (err_thread_out[0] if err_thread_out else "") or ""
-    if timed_out:
-        return {"error": f"timeout > {TIMEOUT_S}s", "kind": "timeout"}
-    if proc.returncode != 0 or report is None:
-        last = (stderr.strip().splitlines() or stdout_tail or ["no output"])[-1]
-        if proc.returncode in (-9, 137) or "MemoryError" in stderr:
-            return {"error": "killed (likely out of memory)", "kind": "oom", "stderr": stderr}
-        return {"error": last[:200], "kind": "crash", "stderr": stderr}
-    # rusage is exact for the probed process; the sampler adds what its descendants
-    # (worker pools, compiled solvers) held, which rusage reports only for the largest
-    # reaped child. The sampler's own reading of the main process is noisy (it can
-    # land before or after a short peak), so it only adds the children's share.
-    own_added = max(report["rss_peak"] - report["rss_setup"], 0)
-    kids_seen = max(usage["peak"] - report["rss_peak"], 0)
-    kids = max(kids_seen, report["rss_kids"])
-    report.update(
-        peak_gb=(report["rss_peak"] + kids) / 1024**3,
-        added_gb=(own_added + kids) / 1024**3,
-        cores_used=round(usage["cpu"] / usage["wall"], 1) if usage["wall"] > 0.05 else None,
-    )
-    return report
-
-
-def _min_of(problem, cores=1, repeats=1):
-    """Fastest of `repeats` runs (errors returned immediately)."""
-    best = None
-    for _ in range(max(1, repeats)):
-        run = _run_once(problem, cores)
-        if "error" in run:
-            return run
-        if best is None or run["work_s"] < best["work_s"]:  # pylint: disable=unsubscriptable-object
-            best = run
-    return best
-
-
 CPU_PROFILES = [("8x32", 8, 32), ("16x128", 16, 128), ("48x768", 48, 768)]
 HEADROOM = 1.3
-MIN_TIMED_S = 2.0  # short work phases are repeated until this much has run, for timing
 LAPTOP_GB = 12  # estimate x headroom at or below this fits a typical laptop
-MIN_FORMULA_GB = 0.05  # a check adding less than this after setup measures only overhead
+MIN_ADDED_GB = 0.05  # a run adding less than this over the overhead measures only imports
 
 
 def _validate():
@@ -426,13 +101,6 @@ def _validate():
                 continue
             if not isinstance(value, (int, float)) or value < 0:
                 errors.append(f"{name} must return a non-negative number, got {value!r}")
-    if not LOCAL_CHECKS:
-        errors.append("LOCAL_CHECKS is empty: run at least the smallest tier locally")
-    for check in LOCAL_CHECKS:
-        if isinstance(check, str) and check not in TIERS:
-            errors.append(f"LOCAL_CHECKS entry {check!r} is not a tier label")
-        elif not isinstance(check, (str, dict)):
-            errors.append(f"LOCAL_CHECKS entries must be tier labels or dicts, got {check!r}")
     if errors:
         sys.exit("scale_probe: fix the edit block:\n  - " + "\n  - ".join(errors))
 
@@ -457,33 +125,6 @@ def _fmt_gb(gb):
     return f"{gb:.2g} GB" if gb < 10 else f"{gb:,.0f} GB"
 
 
-def _cores_sweep(problem, notes):
-    """Measured speedup by core count on one problem; returns (helpful cores, speedups)."""
-    available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count()
-    counts = sorted({1, *[c for c in CORES if c <= available]})
-    if len(counts) == 1:
-        return None, {}  # nothing to compare; skip re-running the workload
-    times = {}
-    for cores in counts:
-        run = _min_of(problem, cores, repeats=2)
-        if "error" in run:
-            notes.append(f"core sweep at {cores} cores failed: {run['error']}")
-            continue
-        times[cores] = run
-    if 1 not in times:
-        return None, {}
-    if times[1]["work_s"] * times[1].get("repeats", 1) < 1:
-        notes.append(
-            "core sweep skipped: the work phase takes < 1 s, too short to time - whether more "
-            "cores help is NOT measured; use a bigger check, or compare two profiles in the cloud"
-        )
-        return None, {}
-    speedup = {c: round(times[1]["work_s"] / r["work_s"], 2) for c, r in times.items()}
-    helpful = max(c for c, s in speedup.items() if s / c >= 0.6)
-    notes.append(f"speedup by cores (measured locally): {speedup}")
-    return helpful, speedup
-
-
 def _rungs(need_gb, cores):
     """Smallest CPU profile that fits, plus the next one up as a fallback."""
     if need_gb <= LAPTOP_GB and cores <= 8:
@@ -496,135 +137,146 @@ def _rungs(need_gb, cores):
     return fits[0][0], fallback
 
 
-def _check_runs(notes):
-    """Run LOCAL_CHECKS; return [(name, problem, run)] in order."""
-    out = []
-    for check in LOCAL_CHECKS:
-        name, problem = (check, TIERS[check]) if isinstance(check, str) else ("check", check)
-        run = _min_of(problem)
-        out.append((name, problem, run))
-        if "error" in run:
-            notes.append(f"local check {name} failed: {run['error']}")
-            print(run.get("stderr") or run["error"], file=sys.stderr)
-    return out
+def _fit_memory(runs, notes):
+    """Fit peak = overhead + k * formula over the runs; flag a wrong shape.
 
-
-def _calibrate(checks, notes):  # pylint: disable=too-many-locals
-    """Fit measured memory = overhead + k * formula, and time = t0 * (units / u0) ** a.
-
-    One usable check gives k only (overhead = setup memory); two or more also give
-    the overhead and the time exponent; three or more test the formula's shape.
+    Two runs fix the line exactly, so the shape can only be tested with three or more:
+    a middle run far off the line means the formula has the wrong exponent or misses
+    an object. With two, a negative or zero slope is the only shape signal.
     """
-    good = [(n, p, r) for n, p, r in checks if "error" not in r]
-    if not good:
+    pts = sorted(
+        ((MEMORY_GB(r["problem"]), r["resources"]["peak_gb"]) for r in runs), key=lambda x: x[0]
+    )
+    if len(pts) < 2 or pts[-1][0] <= pts[0][0] or pts[-1][1] - pts[0][1] < MIN_ADDED_GB:
+        form, peak = pts[-1]
+        notes.append(
+            "UNTESTED SHAPE: the runs don't span enough size to fit how memory grows. Run a "
+            "second size ~2-4x larger in formula memory before trusting larger tiers."
+        )
+        return {"base": 0.0, "k": (peak / form) if form > 0 else 1.0}
+    (f_lo, m_lo), (f_hi, m_hi) = pts[0], pts[-1]
+    k = (m_hi - m_lo) / (f_hi - f_lo)
+    base = m_hi - k * f_hi
+    if k <= 0 or base < 0:
+        k, base = m_hi / f_hi, 0.0
+        notes.append("memory grows faster than the formula: using the largest run's ratio")
+    notes.append(f"memory fit over {len(pts)} runs: {_fmt_gb(base)} overhead + {k:.2g} x formula")
+    if f_hi < 1.8 * f_lo:
+        notes.append("the runs are less than ~2x apart in formula memory: spread them out")
+    for form, peak in pts[1:-1]:
+        pred = base + k * form
+        if not 0.67 < peak / max(pred, 1e-9) < 1.5:
+            notes.append(
+                f"SHAPE WRONG: a middle run is {peak / pred:.2f}x the fitted line - the formula "
+                "has the wrong exponent or misses an object; fix it before trusting larger tiers"
+            )
+    if len(pts) == 2:
+        notes.append("two runs fix the line; a third size would test the formula's shape")
+    return {"base": base, "k": k}
+
+
+def _fit_time(runs, notes):
+    if TIME_UNITS is None:
         return None
-    good.sort(key=lambda c: MEMORY_GB(c[1]))
-    if not good[-1][2].get("generator"):
-        notes.append("`work` is not a generator: setup (imports, preparation) is counted as work")
-    setup = max(r["peak_gb"] - r["added_gb"] for _, _, r in good)
-    usable = [
-        (MEMORY_GB(p), r["added_gb"], n)
-        for n, p, r in good
-        if MEMORY_GB(p) > 0 and r["added_gb"] >= MIN_FORMULA_GB
-    ]
-    model = {"k": 1.0, "overhead": setup, "time": None, "power": None}
-    if not usable:
-        notes.append(
-            f"every check added less than {_fmt_gb(MIN_FORMULA_GB)} after setup: the runs only "
-            "measure imports. Add a larger LOCAL_CHECKS problem (still < a few minutes) to "
-            "test the "
-            "formula. Using the formula as is."
-        )
-    elif len(usable) == 1:
-        form, m, name = usable[0]
-        model["k"] = max(m, 1e-6) / form
-        notes.append(
-            f"memory check on {name}: formula {_fmt_gb(form)}, measured {_fmt_gb(m)} -> ratio "
-            f"{model['k']:.2g}. UNTESTED SHAPE: one check gives the constant, not how memory "
-            "grows. Add a second check ~2-4x larger in formula memory before trusting the tiers."
-        )
+    pts = sorted(
+        (
+            (TIME_UNITS(r["problem"]), r["resources"]["wall_s"])
+            for r in runs
+            if TIME_UNITS(r["problem"]) > 0 and r["resources"].get("wall_s", 0) > 1
+        ),
+        key=lambda x: x[0],
+    )
+    if not pts:
+        notes.append("no run took over a second: time not fitted")
+        return None
+    (u1, t1), (u2, t2) = pts[0], pts[-1]
+    exp = math.log(t2 / t1) / math.log(u2 / u1) if len(pts) > 1 and u2 > 1.5 * u1 else 1.0
+    if len(pts) > 1:
+        notes.append(f"time grows as TIME_UNITS^{exp:.2f} between the runs")
     else:
-        (f1, m1, _), (f2, m2, _) = usable[0], usable[-1]
-        k = (m2 - m1) / (f2 - f1) if f2 > f1 else m2 / f2
-        c = m2 - k * f2
-        if k <= 0 or c < -0.5 * m2:
-            notes.append(
-                "memory grows faster than the formula between the checks: the formula probably "
-                "misses the dominant object or its exponent. Using the largest check's ratio."
-            )
-            k, c = m2 / f2, 0.0
-        model["k"], model["overhead"] = k, setup + max(c, 0.0)
-        notes.append(
-            f"memory fit over {len(usable)} checks: {_fmt_gb(max(c, 0.0))} overhead + "
-            f"{k:.2g} x formula (ratios {m1 / f1:.2g} -> {m2 / f2:.2g})"
-        )
-        if f2 < 1.8 * f1:
-            notes.append(
-                "the checks are less than ~2x apart in formula memory: too close to test the "
-                "shape; spread them further"
-            )
-        drift = (m2 / f2) / (m1 / f1)
-        if 0.67 <= drift < 0.85:
-            notes.append(
-                "the ratio falls between the checks: fixed costs are still a large share of "
-                "them, so estimates for bigger tiers are probably HIGH - fine to try a smaller "
-                "profile first and let the first real run decide"
-            )
-        if not 0.67 < drift < 1.5 and m1 > 0 and f2 > f1:
-            alpha = math.log(m2 / m1) / math.log(f2 / f1)
-            model["power"] = (f2, m2, alpha)
-            notes.append(
-                f"SHAPE WRONG: the ratio drifts {drift:.2f}x between the checks, so memory grows "
-                f"as formula^{alpha:.2f}, not formula^1. Tier estimates below use that measured "
-                "power instead of the formula's; fix the formula (a wrong exponent, or a factor "
-                "that grows with size) and rerun - an empirical power from two points is rough."
-            )
-        for form, m, name in usable[1:-1]:
-            pred = max(c, 0.0) + k * form
-            if not 0.67 < m / max(pred, 1e-9) < 1.5:
-                notes.append(f"check {name} is off the fit by {m / pred:.2f}x: recheck the formula")
-    if not 1 / 3 <= model["k"] <= 3:
-        notes.append(
-            f"the formula is off by {max(model['k'], 1 / model['k']):.1f}x: fine if the shape is "
-            "right (the fit corrects it), but check it does not miss a copy or a worker count"
-        )
-    if TIME_UNITS is not None:
-        pts = [(TIME_UNITS(p), r["work_s"]) for _, p, r in good if TIME_UNITS(p) > 0]
-        reps = {id(r): r.get("repeats", 1) for _, _, r in good}
-        timed = [
-            pt
-            for pt, (_, _, r) in zip(pts, [g for g in good if TIME_UNITS(g[1]) > 0])
-            if pt[1] > 0.5 or pt[1] * reps[id(r)] >= MIN_TIMED_S * 0.9
-        ]
-        if len(timed) < len(pts):
-            notes.append(
-                f"{len(pts) - len(timed)} check(s) ran < 0.5 s, too short to time: make the "
-                "checks bigger for a time fit (memory and time both need checks that take a while)"
-            )
-        pts = timed
-        if len(pts) == 1:
-            notes.append(
-                "only one check was long enough to time: tier times assume time grows exactly "
-                "as TIME_UNITS, which is a guess"
-            )
-        if pts:
-            (u1, t1), (u2, t2) = pts[0], pts[-1]
-            exp = 1.0
-            if len(pts) > 1 and u2 > 1.5 * u1:
-                exp = math.log(t2 / t1) / math.log(u2 / u1)
-                notes.append(f"time grows as TIME_UNITS^{exp:.2f} between the checks")
-                if not 0.8 < exp < 1.2:
-                    notes.append(
-                        "time does not grow in proportion to TIME_UNITS: either TIME_UNITS misses "
-                        "a factor, or fixed costs still dominate the checks. Using the fit, which "
-                        "is the less certain the further the tiers are from the checks."
-                    )
-            model["time"] = (u2, t2, exp)
-    return model
+        notes.append("one timed run: tier times assume time grows exactly as TIME_UNITS")
+    return (u2, t2, exp)
 
 
-def _estimate_only():
-    """Evaluate MEMORY_GB for every tier without running anything (code cannot run locally)."""
+def size(runs):
+    """Fit the measured runs and print a starting machine and fallback for every tier."""
+    _validate()
+    notes = []
+    runs = [r for r in runs if (r.get("resources") or {}).get("peak_gb") is not None]
+    if not runs:
+        sys.exit("scale_probe: no runs with resources.peak_gb to fit")
+    mem, tim = _fit_memory(runs, notes), _fit_time(runs, notes)
+    cores_used = max(r["resources"].get("cores_used") or 1 for r in runs)
+    granted = max(r["resources"].get("cores_granted") or 1 for r in runs)
+    if granted >= 4 and cores_used < 0.5 * granted:
+        notes.append(
+            f"the runs used about {cores_used:.1f} of {granted} cores: extra cores come "
+            "with the memory but do not speed this up"
+        )
+    rows = []
+    for label, problem in TIERS.items():
+        formula = MEMORY_GB(problem)
+        est = mem["base"] + mem["k"] * formula
+        seconds = None
+        if tim:
+            u_ref, t_ref, exp = tim
+            seconds = t_ref * (TIME_UNITS(problem) / u_ref) ** exp
+            if seconds > 20 * 3600:
+                notes.append(f"tier {label}: ~{_fmt_t(seconds)}, near or past the 24 h job limit")
+        first, fallback = _rungs(est * HEADROOM, round(cores_used))
+        rows.append(
+            {
+                "tier": label,
+                "problem": problem,
+                "formula_gb": formula,
+                "estimate_gb": est,
+                "time_s": seconds,
+                "first": first,
+                "fallback": fallback,
+            }
+        )
+    print(f"\n{'tier':<5}{'formula':<11}{'estimate':<11}{'time':<10}{'start on':<18}fallback")
+    for row in rows:
+        print(
+            f"{row['tier']:<5}{_fmt_gb(row['formula_gb']):<11}{_fmt_gb(row['estimate_gb']):<11}"
+            f"{_fmt_t(row['time_s']):<10}{row['first']:<18}{row['fallback'] or '-'}"
+        )
+    print(
+        f"\nfrom {len(runs)} measured run(s); machines fit estimate x {HEADROOM}. Expect ~2x "
+        "error until a run at a size close to the tier. notes:"
+    )
+    for note in dict.fromkeys(notes):
+        print("  -", note)
+    with open(os.path.join(HERE, "scale_probe.json"), "w", encoding="utf-8") as handle:
+        json.dump(
+            {"tiers": rows, "notes": list(dict.fromkeys(notes))}, handle, indent=1, default=str
+        )
+    return rows
+
+
+def check(label, runs_file):
+    """Run one tier locally under telemetry, print it, and append it to runs_file."""
+    _validate()
+    sys.path.insert(0, HERE)
+    from mw_telemetry import telemetry  # pylint: disable=import-outside-toplevel,import-error
+
+    problem = TIERS[label]
+    with telemetry(heartbeat_s=60) as tel:
+        with tel.stage("work"):
+            work(**problem)
+    print(json.dumps(tel.summary))
+    runs = []
+    if os.path.exists(runs_file):
+        with open(runs_file, encoding="utf-8") as handle:
+            runs = json.load(handle)
+    runs.append({"problem": problem, "resources": tel.summary, "where": "local"})
+    with open(runs_file, "w", encoding="utf-8") as handle:
+        json.dump(runs, handle, indent=1)
+    print(f"appended to {runs_file}; {len(runs)} run(s) recorded")
+
+
+def estimate_only():
+    """Evaluate MEMORY_GB for every tier without running anything."""
     _validate()
     print(f"{'tier':<5}{'formula':<11}{'x1.3':<11}{'start on':<20}fallback   (constant UNMEASURED)")
     for label, problem in TIERS.items():
@@ -636,111 +288,18 @@ def _estimate_only():
         )
     print(
         "LOWER BOUND, NOT A SIZING: the constant is unmeasured, and real copies, workspace and\n"
-        "workers often add 2-30x. Run two LOCAL_CHECKS (or the s size in the cloud) before\n"
-        "choosing machines."
+        "workers often add 2-30x. Measure small runs (Step 3 of SKILL.md) before choosing."
     )
 
 
-def main():  # pylint: disable=too-many-locals
-    """Run the local checks, scale the formula, and print a table with rungs."""
-    _validate()
-    notes = []
-    checks = _check_runs(notes)
-    model = _calibrate(checks, notes)
-    if model is None:
-        print("scale_probe: every local check failed; see the errors above.", file=sys.stderr)
-        sys.exit(1)
-    biggest = max((c for c in checks if "error" not in c[2]), key=lambda c: MEMORY_GB(c[1]))
-    helpful, speedup = _cores_sweep(biggest[1], notes)
-    gpu = biggest[2].get("gpu_share")
-    aer = biggest[2].get("aer_share")
-    if biggest[2].get("cores_used", 0) and biggest[2]["cores_used"] > 1.5 and not gpu:
-        notes.append("GPU share n/a: compute appears to run outside Python (subprocess or C/C++)")
-    if aer:
-        notes.append(f"{aer:.0%} of time in qiskit_aer: GPU helps only with method='statevector'")
-    measured = {n: r for n, _, r in checks if isinstance(n, str) and n in TIERS}
-
-    rows = []
-    for label, problem in TIERS.items():
-        formula = MEMORY_GB(problem)
-        if model["power"] is not None and formula > 0:
-            f_ref, m_ref, alpha = model["power"]
-            est = model["overhead"] + m_ref * (formula / f_ref) ** alpha
-        else:
-            est = model["overhead"] + model["k"] * formula
-        row = {"tier": label, "problem": problem, "formula_gb": formula, "estimate_gb": est}
-        run = measured.get(label)
-        if run is not None and "error" in run:
-            row["how"] = f"failed locally: {run['error']}"
-        elif run is not None:
-            row.update(estimate_gb=run["peak_gb"], how="measured")
-        else:
-            row["how"] = (
-                f"measured power {model['power'][2]:.2f} of formula (shape wrong)"
-                if model["power"] is not None
-                else f"formula x {model['k']:.2g} + {_fmt_gb(model['overhead'])}"
-            )
-        if model["time"] is not None:
-            u_ref, t_ref, exp = model["time"]
-            seconds = t_ref * (TIME_UNITS(problem) / u_ref) ** exp / speedup.get(helpful or 1, 1)
-            row["time_s"] = run["work_s"] if run and "error" not in run else seconds
-            if row["time_s"] > 20 * 3600:
-                notes.append(
-                    f"tier {label}: ~{_fmt_t(row['time_s'])}, near or past the 24 h job limit"
-                )
-        row["first"], row["fallback"] = _rungs(row["estimate_gb"] * HEADROOM, helpful or 1)
-        rows.append(row)
-
-    print(
-        f"\n{'tier':<5}{'formula':<11}{'estimate':<11}{'time':<10}"
-        f"{'start on':<18}{'fallback':<10}how"
-    )
-    for row in rows:
-        print(
-            f"{row['tier']:<5}{_fmt_gb(row['formula_gb']):<11}{_fmt_gb(row['estimate_gb']):<11}"
-            f"{_fmt_t(row.get('time_s')):<10}{row['first']:<18}"
-            f"{row['fallback'] or '-':<10}{row['how']}"
-        )
-    for row in rows:
-        if row["first"].endswith("(try it)"):
-            budget = [(name, gb / HEADROOM) for name, _, gb in CPU_PROFILES]
-            notes.append(
-                f"tier {row['tier']} estimates above the largest profile - but the estimate may "
-                "be high, so start it on 48x768 and see. To climb toward it, each profile fits "
-                "a formula value up to about "
-                + ", ".join(
-                    f"{name}: {_fmt_gb(max(gb - model['overhead'], 0) / model['k'])}"
-                    for name, gb in budget
-                )
-                + " (in MEMORY_GB units) - pick the problem sizes for each rung from that"
-            )
-    cores_txt = f"{helpful} helpful core(s)" if helpful else "cores not measured"
-    print(f"\nrungs fit estimate x {HEADROOM} and {cores_txt}. Problems:")
-    for row in rows:
-        print(f"  {row['tier']}: {row['problem']}")
-    if gpu is not None:
-        notes.append(f"share of time in GPU-portable libraries (local check): {gpu:.2f}")
-    print("notes:")
-    for note in dict.fromkeys(notes):
-        print("  -", note)
-    with open(os.path.join(HERE, "scale_probe.json"), "w", encoding="utf-8") as handle:
-        json.dump(
-            {
-                "tiers": rows,
-                "helpful_cores": helpful,
-                "speedup": speedup,
-                "notes": list(dict.fromkeys(notes)),
-            },
-            handle,
-            indent=1,
-            default=str,
-        )
-
-
-if __name__ == "__main__":  # guard required: worker pools re-import this file
-    if len(sys.argv) > 1 and sys.argv[1] == "--estimate":
-        _estimate_only()
-    elif len(sys.argv) > 1 and sys.argv[1] == "--child":
-        _child(json.loads(sys.argv[2]), int(sys.argv[3]))
+if __name__ == "__main__":
+    ARGS = sys.argv[1:]
+    if ARGS[:1] == ["--estimate"]:
+        estimate_only()
+    elif ARGS[:1] == ["--check"]:
+        check(ARGS[1] if len(ARGS) > 1 else next(iter(TIERS)), os.path.join(HERE, "runs.json"))
+    elif ARGS:
+        with open(ARGS[0], encoding="utf-8") as fh:
+            size(json.load(fh))
     else:
-        main()
+        print(__doc__)
