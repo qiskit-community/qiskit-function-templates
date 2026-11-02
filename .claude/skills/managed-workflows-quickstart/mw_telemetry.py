@@ -39,6 +39,14 @@ through channels the service already has:
 * a ``telemetry-<run id>.json`` file in the function's storage with every sample,
   fetched afterwards with ``serverless.file_download(name, function)``.
 
+With ``telemetry(alloc_check={"cap_gb": 4, "max_hits": 3})`` the run becomes an
+allocation check, which ``mw_sweep.py --target`` submits as a job: each numpy array-creation call
+(``zeros``, ``empty``, ``ones``, ``full`` and their ``_like`` forms) above the cap is
+recorded (shape, dtype, size, calling lines) and replaced by a tiny stand-in, and
+the run stops after ``max_hits`` of them. It tells you which objects dominate
+at research size without allocating them. It is a lower bound: arrays created
+elsewhere (einsum, BLAS, C/C++ libraries) are not seen.
+
 From your own machine, ``python mw_telemetry.py replay telemetry-<run id>.json``
 sends a downloaded file (or saved logs) to an OpenTelemetry collector over
 OTLP/HTTP, using the standard ``OTEL_EXPORTER_OTLP_*`` settings. Live export from
@@ -48,6 +56,7 @@ reachable, such as a laptop or an on-premises machine.
 
 import contextlib
 import json
+import math
 import os
 import resource
 import sys
@@ -111,6 +120,88 @@ def _fmt(value):
     return round(value, 2) if value is not None else None
 
 
+class AllocationStop(BaseException):
+    """Raised inside the run once the allocation check has seen enough large arrays.
+
+    A ``BaseException`` so that ``except Exception`` in the research code does not catch it.
+    """
+
+
+_ALLOC_CALLS = ("zeros", "empty", "ones", "full", "zeros_like", "empty_like", "ones_like")
+
+
+class _AllocWatch:
+    """Intercept large numpy array creation; record it and hand back a tiny stand-in."""
+
+    def __init__(self, cap_gb, max_hits, on_hit):
+        limit = _read_gb("memory.max")  # never let a below-cap array take more than half
+        self.cap_gb = min(cap_gb, 0.5 * limit) if limit else cap_gb
+        self.max_hits = max_hits
+        self.on_hit = on_hit
+        self.hits = []
+        self._orig = {}
+        self._np = None
+
+    @staticmethod
+    def _sites():
+        frame, out = sys._getframe(1), []  # pylint: disable=protected-access
+        while frame and len(out) < 4:
+            name = frame.f_code.co_filename
+            if "numpy" not in name and name != __file__:
+                out.append(f"{os.path.basename(name)}:{frame.f_lineno}")
+            frame = frame.f_back
+        return out
+
+    def _request(self, name, args, kw):
+        np = self._np
+        if name.endswith("_like"):
+            proto = args[0] if args else kw.get("a")
+            shape = kw.get("shape", getattr(proto, "shape", ()))
+            dtype = kw.get("dtype", args[1] if len(args) > 1 else getattr(proto, "dtype", float))
+        else:
+            shape = args[0] if args else kw.get("shape", ())
+            pos = 2 if name == "full" else 1
+            dtype = kw.get("dtype", args[pos] if len(args) > pos else None)
+        shape = tuple(int(d) for d in shape) if isinstance(shape, (tuple, list)) else (int(shape),)
+        dtype = np.dtype(dtype if dtype is not None else float)
+        return shape, dtype, math.prod(shape) * dtype.itemsize / 1e9
+
+    def _wrap(self, name):
+        orig = self._orig[name]
+
+        def alloc(*args, **kw):
+            try:
+                shape, dtype, gb = self._request(name, args, kw)
+            except (TypeError, ValueError):
+                return orig(*args, **kw)
+            if gb <= self.cap_gb:
+                return orig(*args, **kw)
+            hit = {"call": f"np.{name}", "shape": list(shape), "dtype": str(dtype)}
+            hit.update({"gb": round(gb, 3), "sites": self._sites()})
+            self.hits.append(hit)
+            self.on_hit(hit, len(self.hits))
+            if len(self.hits) >= self.max_hits:
+                raise AllocationStop(f"{len(self.hits)} arrays above {self.cap_gb:.3g} GB")
+            return self._orig["zeros"]((1,) * max(len(shape), 1), dtype=dtype)
+
+        return alloc
+
+    def install(self):
+        """Patch numpy's array-creation calls."""
+        import numpy as np  # pylint: disable=import-outside-toplevel
+
+        self._np = np
+        for name in _ALLOC_CALLS:
+            self._orig[name] = getattr(np, name)
+        for name in _ALLOC_CALLS:
+            setattr(np, name, self._wrap(name))
+
+    def uninstall(self):
+        """Restore numpy."""
+        for name, func in self._orig.items():
+            setattr(self._np, name, func)
+
+
 class _LiveOtel:
     """Optional live OTLP export, only when an endpoint is set and reachable."""
 
@@ -150,8 +241,12 @@ class _LiveOtel:
 class Telemetry:  # pylint: disable=too-many-instance-attributes
     """Collects the run's resources; ``summary`` and ``samples`` are JSON-friendly."""
 
-    def __init__(self, heartbeat_s=300, service="managed-workflow", run_id=None):
+    def __init__(self, heartbeat_s=300, service="managed-workflow", run_id=None, alloc_check=None):
         self.heartbeat_s = heartbeat_s
+        self._watch = None
+        if alloc_check:
+            cap, hits = float(alloc_check.get("cap_gb", 4)), int(alloc_check.get("max_hits", 3))
+            self._watch = _AllocWatch(cap, hits, self._on_hit)
         self.service = service
         self.run_id = run_id or os.environ.get("ENV_JOB_ID") or uuid.uuid4().hex[:12]
         self.stages = {}
@@ -160,7 +255,7 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
         self.file = None
         self._otel = _LiveOtel(service)
         self._stop = threading.Event()
-        self._t0 = self._c0 = None
+        self._t0 = self._c0 = self._start_gb = None
         self._tree_peak = 0.0  # sampled process-tree peak, used without a container counter
 
     def _peak(self):
@@ -207,6 +302,14 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
                     f"stage {name} done in {seconds} s", event="stage_end", stage=name, s=seconds
                 )
 
+    def _on_hit(self, hit, count):
+        self.log(
+            f"large allocation #{count}: {hit['call']}{tuple(hit['shape'])} {hit['dtype']} = "
+            f"{hit['gb']:,.1f} GB at {' < '.join(hit['sites'])}",
+            event="large_allocation",
+            **hit,
+        )
+
     def _beat(self):
         last = time.perf_counter()
         sample = _read_gb("memory.peak") is None  # sample the tree only without a container counter
@@ -241,37 +344,58 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
 
     def __enter__(self):
         self._t0, self._c0 = time.perf_counter(), _cpu_s()
+        self._start_gb = current_gb()
         threading.Thread(target=self._beat, daemon=True).start()
         self.log(
             f"start, cores granted {_cores_granted()}",
             event="start",
             cores_granted=_cores_granted(),
         )
+        if self._watch:
+            self._watch.install()
+            self.log(f"allocation check on, cap {self._watch.cap_gb:.3g} GB", event="alloc_check")
         return self
 
     def __exit__(self, *exc):
         self._stop.set()
+        suppress = False
+        if self._watch:
+            self._watch.uninstall()
+            if exc[0] is None:
+                outcome = "finished"
+            elif isinstance(exc[1], AllocationStop):
+                outcome, suppress = f"stopped: {exc[1]}", True
+            else:  # a stand-in array broke the code further on; the hits so far still count
+                outcome = f"error after {len(self._watch.hits)} stand-in(s): {exc[0].__name__}"
+                suppress = bool(self._watch.hits)
         wall = time.perf_counter() - self._t0
         self.summary = {
             "peak_gb": _fmt(self._peak()),
+            "start_gb": _fmt(self._start_gb),
             "wall_s": round(wall, 1),
             "cores_used": round((_cpu_s() - self._c0) / wall, 1) if wall else None,
             "cores_granted": _cores_granted(),
             "stages": self.stages,
             "source": self._source(),
         }
+        if self._watch:
+            self.summary["alloc_check"] = {
+                "cap_gb": round(self._watch.cap_gb, 3),
+                "outcome": outcome,
+                "hits": self._watch.hits,
+            }
         self.log("end", event="end", summary=self.summary)
         path = self._write_file()
         if path:
             self.file = os.path.basename(path)
             self.summary["telemetry_file"] = self.file
         self._otel.flush()
-        return False
+        return suppress
 
 
-def telemetry(heartbeat_s=300, service="managed-workflow", run_id=None):
+def telemetry(heartbeat_s=300, service="managed-workflow", run_id=None, alloc_check=None):
     """Context manager wrapping a run; see the module docstring."""
-    return Telemetry(heartbeat_s=heartbeat_s, service=service, run_id=run_id)
+    return Telemetry(heartbeat_s, service, run_id, alloc_check)
 
 
 def parse_logs(text):

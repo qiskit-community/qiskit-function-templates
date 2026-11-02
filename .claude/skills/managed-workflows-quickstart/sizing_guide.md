@@ -13,16 +13,18 @@ Ask what small, medium and large problems they actually want to run (labels `s`,
 Then size them in two moves. A formula worked out from the code gets the shape of the growth right; small real runs get the constant right and test the shape. Neither is enough alone: eyeballed numbers come out low, and curves fitted to small runs without a formula under-read exponential growth.
 
 1. **Estimate from the code.** Answer the questions in **Finding what drives the cost**, write the dominant stage's memory as a formula in the tier arguments, and evaluate it for every tier by running the arithmetic — a few lines of Python — not by eye. Leave the constant rough; the runs set it.
-2. **Measure small runs and fit.** Run 2–3 problems smaller than the researcher's, ~2–4× apart in formula memory, as jobs on Managed Workflows (Step 4 of `SKILL.md`), and fit them with `scale_probe.py`. It fits memory as overhead + k × formula and time as a power of `TIME_UNITS`. A k of a few is normal — copies, workspace, library overhead. With three or more sizes it also tests the shape: a middle run far off the fitted line means the formula has a missed copy, a worker count or the wrong exponent, and the larger tiers will be off by more the further out they are. Recheck the formula with the researcher before trusting them.
+2. **Measure small runs and fit.** `python mw_sweep.py sweep` (Step 4 of `SKILL.md`) runs problems smaller than the researcher's as jobs on Managed Workflows, shrinking one argument at a time to ~¼ and ~½ of the formula memory, and fits them with `scale_probe.py`. It fits memory as overhead + k × formula and time as a power of `TIME_UNITS`. A k of a few is normal — copies, workspace, library overhead. It then tests the shape along each argument: if memory grows faster or slower than the formula along one argument, the formula weights that argument wrongly or misses an object that depends on it (a missed copy, a worker count, the wrong exponent), and the larger tiers will be off by more the further out they are. Recheck the formula with the researcher before trusting them.
 
 What to get right in the small runs:
 
 - **Make each one big enough.** It should add memory well beyond imports (a run whose formula gives less than ~0.05 GB measures only overhead) and run for at least a few seconds, or time cannot be fitted.
-- **Scale down along every argument that changes cost**, not just one: an object that depends on an argument you held fixed will not show up in the fit.
+- **Sweep every argument that changes cost** (`SWEEP_ARGS`), not just one: an object that depends on an argument you held fixed will not show up in the fit.
 - **Mock the QPU.** Use a fake backend, cached counts or fixed parameters. Never submit to real hardware while sizing.
 - **Time iterations, not whole runs, for optimizer loops** (AQC, QAOA, VQE). Run a few iterations, and make `TIME_UNITS` count iterations × cost per iteration so the fit can scale the time to each tier.
 - **Watch for libraries that cap their own memory.** Some solvers limit their working memory to a default (often a few GB) and trade the rest for time — the runs then look memory-flat and slower than expected. If memory stops growing between runs while time grows faster, look for a max-memory setting and set it to the profile's memory.
 - **Leave exact checks out.** A full FCI reference, an exact-unitary comparison or an exhaustive enumeration usually grows faster than the method and becomes the largest cost at research scale. Measure the method with them switched off, and size them separately if the researcher wants them.
+
+To see which object dominates at the researcher's own size, `python mw_sweep.py --target l` runs that tier as a job and reports the first numpy array above a cap (shape, size, code line) without allocating it. It is a lower bound on the peak — arrays created outside numpy's creation calls, or several large ones alive at once, are not counted — so use it to check the formula, not to size.
 
 For each tier the fit prints the formula value, the fitted estimate, a rough time if `TIME_UNITS` is set, and a first profile plus a fallback: the smallest CPU profile that covers estimate × 1.3, and the next one up. Present these as a starting point to climb from, not a verdict.
 
@@ -136,10 +138,10 @@ If the piece that must stay together still does not fit on the largest machine, 
 
 The local profile is rough by design; the deployed function is where the researcher gets real numbers. Once it is uploaded, encourage a scale-up sweep — the same incremental way they already work, just with bigger machines to climb onto:
 
-- **Start with `s` on its profile**, then take the next bigger problem on the next profile up. Keep going until something stops them; that is the interesting result.
-- **Read `metadata["resources"]` after each run** (see Step 3 of `SKILL.md`): `peak_gb`, `cores_used`, `cores_granted` and `stages`. Divide `peak_gb` by the formula for that problem to get a new ratio, re-estimate the next tier with it, and pick its profile from that — real numbers replace the local check one rung at a time.
-- **If a run runs out of memory, retry on the fallback** rather than reshaping anything; that is what the fallback is for.
-- **If `cores_used` is far below `cores_granted`**, the extra cores came with the memory, not because they help — that is fine, but no reason to climb for cores alone.
+- **Climb with `python mw_sweep.py climb s m l`**: each tier runs on the profile the fit suggests, smallest first. Keep going until something stops them; that is the interesting result.
+- **Each result goes into `runs.json` and the fit is redone** before the next tier, from `metadata["resources"]` (see Step 3 of `SKILL.md`): `peak_gb`, `cores_used`, `cores_granted` and `stages`. Real numbers replace the estimate one rung at a time.
+- **If a run runs out of memory, it moves up rather than reshaping anything.** A numpy allocation error names the size it wanted, so machines too small for it are skipped; a run killed with no traceback gets one retry on the next profile. Any other error stops the climb with its traceback.
+- **If `cores_used` is far below `cores_granted`**, the extra cores came with the memory, not because they help — that is fine, but no reason to climb for cores alone. If the runs keep the cores busy, `python mw_sweep.py compare <tier> 8x32 16x128` runs the same tier on both and shows what more cores buy (multithreaded kernels and worker pools often give well under 2× for 2× the cores, and pools sized from the core count use more memory).
 - **Add comparison runs where it is unclear** — the same problem on two neighbouring profiles, or a CPU and a GPU profile — to see what more cores or a GPU actually buy.
 - **Update `sizes_map`** from what the runs showed, not from the local estimate.
 
