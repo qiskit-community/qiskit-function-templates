@@ -52,7 +52,7 @@ import scale_probe as sp
 
 # ============================ EDIT THIS BLOCK ============================
 
-ACCOUNT = "mw"  # the name used with QiskitServerless.save_account
+ACCOUNT = "mw"  # the name used with ManagedWorkflowClient.save_account
 FUNCTION = "my-workflow"  # the title used at upload
 BASE = None  # a problem to sweep down from; None uses the smallest tier in TIERS
 SWEEP_ARGS = None  # arguments that change cost; None uses every numeric argument in BASE
@@ -96,9 +96,9 @@ def _save_run(entry):
 
 
 def _function():
-    from qiskit_ibm_catalog import QiskitServerless  # pylint: disable=import-outside-toplevel
+    from qiskit_ibm_catalog import ManagedWorkflowClient  # pylint: disable=import-outside-toplevel
 
-    serverless = QiskitServerless(name=ACCOUNT)
+    serverless = ManagedWorkflowClient(name=ACCOUNT)
     fn = serverless.load(FUNCTION)
     if fn is None:
         sys.exit(f"mw_sweep: function {FUNCTION!r} not found; upload it first (Step 3)")

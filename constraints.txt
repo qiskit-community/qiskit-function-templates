@@ -1,2 +1,3 @@
-qiskit-serverless
+# 0.38.0 makes Fleets the default runner and deprecates `dependencies=`.
+qiskit-serverless>=0.38.0
 qiskit-ibm-runtime

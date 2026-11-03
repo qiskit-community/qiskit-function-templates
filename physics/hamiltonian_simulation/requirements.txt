@@ -1,7 +1,12 @@
+# Packages that are also baked into the Fleets runtime image should track the
+# versions in
+# qiskit-serverless/docker-images/requirements-dynamic-dependencies.txt. Those
+# baked versions are bumping for the 0.38.0 image, so re-check these ranges
+# against that file before this PR merges.
 qiskit-addon-utils~=0.1.0
 qiskit-addon-aqc-tensor~=0.2.0
 qiskit-quimb>=0.0.4, <0.1
-qiskit-serverless
+qiskit-serverless>=0.38.0
 qiskit-ibm-runtime
 
 networkx>=2.3
