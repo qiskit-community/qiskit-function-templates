@@ -156,21 +156,21 @@ A short notebook showing a user how to deploy and run the function. Authenticati
 must use **placeholders, never real credentials**:
 
 ```python
-from qiskit_ibm_catalog import QiskitServerless
+from qiskit_ibm_catalog import ManagedWorkflowClient
 token = "MY_TOKEN"
 instance = "MY_INSTANCE"
-serverless = QiskitServerless(token=token, instance=instance)
+serverless = ManagedWorkflowClient(token=token, instance=instance)
 ```
 
 Then upload the function and run it with a small example. These templates are
 **custom functions** — the uploader owns the whole definition, unlike a provider
-function where the maintainer registers it. Upload with `QiskitFunction` and run the
+function where the maintainer registers it. Upload with `ManagedWorkflow` and run the
 returned handle:
 
 ```python
-from qiskit_ibm_catalog import QiskitFunction
+from qiskit_ibm_catalog import ManagedWorkflow
 
-template = QiskitFunction(
+template = ManagedWorkflow(
     title="<name>_template",
     entrypoint="<name>_entrypoint.py",
     working_dir="./source_files/",   # everything here is uploaded
@@ -195,7 +195,7 @@ a placeholder.
 heavy enough to care about CPU/memory, or scales with a bigger machine (as a
 parallel fan-out does — see **Parallelism**).
 
-If you do add it, declare the catalog **at upload time** on the `QiskitFunction`
+If you do add it, declare the catalog **at upload time** on the `ManagedWorkflow`
 (these are custom functions, so the catalog lives in the function definition, not in
 a separate deploy script):
 
@@ -208,7 +208,7 @@ SIZES_MAP = {
     "l": "48x768",   # 48 CPU, 768 GB
 }
 
-template = QiskitFunction(
+template = ManagedWorkflow(
     title="<name>_template",
     entrypoint="<name>_entrypoint.py",
     working_dir="./source_files/",

@@ -69,9 +69,9 @@ class BaseE2eTestCase(unittest.TestCase):
         # instance CRN, and loads the deployed function with .load(). Imported here (not at
         # module scope) so the unit-test run — which skips this class — never needs the SDK.
         # pylint: disable=import-outside-toplevel
-        from qiskit_ibm_catalog import QiskitServerless
+        from qiskit_ibm_catalog import ManagedWorkflowClient
 
-        cls._client = QiskitServerless(
+        cls._client = ManagedWorkflowClient(
             channel="ibm_quantum_platform",
             token=os.environ.get("QISKIT_IBM_TOKEN"),
             instance=os.environ.get("QISKIT_IBM_CRN"),

@@ -83,7 +83,7 @@ Keep these in mind:
 - **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
 - **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
 - **Log progress** with `print(..., flush=True)` (or `t.log(...)`) once per iteration in long loops. With the heartbeat, a run that's slower than expected, or stuck, shows up in `job.logs()` early.
-- **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
+- **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `ManagedWorkflow`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
 - **If the code fans work out**, size the pool from `os.sched_getaffinity(0)`, not `os.cpu_count()`. Set `OMP_NUM_THREADS` and similar to cores ÷ workers before numpy is imported.
@@ -91,23 +91,29 @@ Keep these in mind:
 Save their account once (they paste their own API key and instance CRN; never write them into files), then upload with the machines from Step 2:
 
 ```python
-from qiskit_ibm_catalog import QiskitServerless, QiskitFunction
+from qiskit_ibm_catalog import ManagedWorkflowClient, ManagedWorkflow
 
-QiskitServerless.save_account(token="<API key>", instance="<CRN>", name="mw", overwrite=True)  # once
-serverless = QiskitServerless(name="mw")
+ManagedWorkflowClient.save_account(token="<API key>", instance="<CRN>", name="mw", overwrite=True)  # once
+serverless = ManagedWorkflowClient(name="mw")
 
-fn = QiskitFunction(
+fn = ManagedWorkflow(
     title="my-workflow",
     entrypoint="entrypoint.py",
     working_dir="./my_workflow/",
     runner="fleets",
     sizes_map={"s": "8x32", "m": "16x128", "l": "48x768"},    # from the fit in Step 4
     default_size="s",
-    dependencies=["qiskit-aer==0.17.2"],                       # extra packages, pinned
 )
 serverless.upload(fn)
 fn = serverless.load("my-workflow")
 ```
+
+Packages come from the runtime image, not from `dependencies=` (that argument is
+deprecated and installs nothing). Call `serverless.dependencies_versions()` to see
+what the image already ships. If you need something it does not have, build a wheel
+and bring it: `serverless.add_wheels(fn, ["dist/mypkg-1.0-*.whl"])`, then call
+`install_uploaded_wheels()` at the top of the entrypoint. Use
+`serverless.dependency_report([...])` to check your requirements against the image first.
 
 Profiles available today:
 

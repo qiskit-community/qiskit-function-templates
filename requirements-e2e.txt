@@ -1,5 +1,8 @@
 # Requirements for "deploy_and_run" tutorials and end-to-end tests
 qiskit>=1.4, <2.0
-qiskit-ibm-catalog
+# The deploy_and_run notebooks use the renamed client classes
+# (ManagedWorkflowClient / FunctionsCatalog / ManagedWorkflow), which are added as
+# aliases in qiskit-ibm-catalog 0.22.0. Earlier releases will raise ImportError.
+qiskit-ibm-catalog>=0.22.0
 qiskit-ibm-runtime
 numpy~=2.2.5
