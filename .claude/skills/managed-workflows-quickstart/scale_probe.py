@@ -85,9 +85,10 @@ TIME_UNITS = None  # optional: lambda p: relative amount of work, e.g. p["iterat
 
 VALID_LABELS = ("S", "M", "L", "XL")
 HERE = os.path.dirname(os.path.abspath(__file__))
-# (id, vCPU, GB), smallest first. Offline default only: mw_sweep.py replaces it with the
-# CPU profiles the deployment lists in ``mw.compute_profiles()``.
-CPU_PROFILES = [("8x32", 8, 32), ("16x128", 16, 128), ("48x768", 48, 768)]
+ACCOUNT = None  # the name used with ManagedWorkflowClient.save_account; None = default account
+# (id, vCPU, GB) of the deployment's CPU profiles, smallest first, read from
+# ``ManagedWorkflowClient().compute_profiles()`` by load_profiles(); never hard-coded.
+CPU_PROFILES = []
 HEADROOM = 1.3
 LAPTOP_GB = 12  # estimate x headroom at or below this fits a typical laptop
 MIN_ADDED_GB = 0.05  # a run adding less than this over the overhead measures only imports
@@ -146,8 +147,45 @@ def _fmt_gb(gb):
     return f"{gb:.2g} GB" if gb < 10 else f"{gb:,.0f} GB"
 
 
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_profiles(client=None):
+    """Fill CPU_PROFILES from the deployment's ``compute_profiles()`` (CPU-only, smallest first)."""
+    global CPU_PROFILES  # pylint: disable=global-statement
+    if CPU_PROFILES:
+        return CPU_PROFILES
+    try:
+        if client is None:
+            from qiskit_ibm_catalog import ManagedWorkflowClient  # pylint: disable=import-outside-toplevel
+
+            client = ManagedWorkflowClient(name=ACCOUNT)
+        catalog = list(client.compute_profiles())
+    except Exception as exc:  # pylint: disable=broad-except
+        sys.exit(
+            "scale_probe: could not list compute profiles with ManagedWorkflowClient()."
+            f"compute_profiles() ({exc.__class__.__name__}: {exc}). Machine choices need the "
+            "deployment's list: install qiskit-ibm-catalog>=0.22 and save an account (SKILL.md, Step 3)."
+        )
+    cpu = []
+    for prof in catalog:
+        cores, mem = _num(getattr(prof, "cpu", None)), _num(getattr(prof, "memory", None))
+        if getattr(prof, "gpu", None) or cores is None or mem is None:
+            continue
+        cpu.append((prof.compute_profile_id, int(cores), int(mem) if mem.is_integer() else mem))
+    if not cpu:
+        sys.exit("scale_probe: compute_profiles() returned no CPU profiles")
+    CPU_PROFILES = sorted(cpu, key=lambda p: (p[2], p[1]))
+    return CPU_PROFILES
+
+
 def _rungs(need_gb, cores):
     """Smallest CPU profile that fits, plus the next one up as a fallback."""
+    load_profiles()
     if need_gb <= LAPTOP_GB and cores <= 8:
         return "laptop", CPU_PROFILES[0][0]
     largest = CPU_PROFILES[-1]

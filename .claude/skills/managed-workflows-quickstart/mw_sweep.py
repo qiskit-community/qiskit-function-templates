@@ -17,8 +17,8 @@ Copy this file next to ``scale_probe.py`` (it reads ``TIERS``, ``MEMORY_GB`` and
 
     python mw_sweep.py sweep            # small jobs, one argument varied at a time
     python mw_sweep.py climb s m l      # run tiers smallest first, refit after each
-    python mw_sweep.py climb m --from 8x32   # start tier m on a given machine
-    python mw_sweep.py compare m 8x32 16x128   # same tier on two machines: what cores buy
+    python mw_sweep.py climb m --from <profile>   # start tier m on a given machine
+    python mw_sweep.py compare m <profile> <profile>   # same tier on two machines: what cores buy
     python mw_sweep.py --target l       # allocation check on tier l, as a job
                                         # (--cap-gb 4, --hits 1, --size s)
     python mw_sweep.py fit              # refit runs.json and print the advice again
@@ -49,8 +49,7 @@ stuck run does not keep using the instance's allocation for up to 24 hours.
 Every number printed comes from a job: its id and ``metadata["resources"]`` are
 kept in ``runs.json``. The entrypoint must pass ``alloc_check`` to ``telemetry()``
 for ``--target`` (SKILL.md, Step 3). Machines are the CPU profiles the deployment
-lists in ``mw.compute_profiles()``. Needs ``qiskit-ibm-catalog>=0.22``; older clients fall back to the
-profiles in ``scale_probe``.
+lists in ``mw.compute_profiles()``. Needs ``qiskit-ibm-catalog>=0.22``.
 """
 
 import json
@@ -120,32 +119,10 @@ def _function():
     return fn
 
 
-def _num(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def use_deployment_profiles(client):
-    """Replace ``scale_probe.CPU_PROFILES`` with the deployment's CPU-only profiles.
-
-    Keeps the built-in list when the client has no ``compute_profiles()`` or the call fails.
-    """
-    try:
-        catalog = list(client.compute_profiles())
-    except Exception as exc:  # pylint: disable=broad-except
-        _say(f"compute_profiles() unavailable ({exc.__class__.__name__}); using built-in list")
-        return sp.CPU_PROFILES
-    cpu = []
-    for prof in catalog:
-        cores, mem = _num(getattr(prof, "cpu", None)), _num(getattr(prof, "memory", None))
-        if getattr(prof, "gpu", None) or cores is None or mem is None:
-            continue
-        cpu.append((prof.compute_profile_id, int(cores), int(mem) if mem.is_integer() else mem))
-    if cpu:
-        sp.CPU_PROFILES = sorted(cpu, key=lambda p: (p[2], p[1]))
-    return sp.CPU_PROFILES
+    """Fill ``scale_probe.CPU_PROFILES`` with the deployment's CPU profiles from compute_profiles()."""
+    sp.CPU_PROFILES = []
+    return sp.load_profiles(client)
 
 
 def _profile_of(fn, label):

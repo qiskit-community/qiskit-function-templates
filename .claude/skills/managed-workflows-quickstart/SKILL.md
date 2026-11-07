@@ -6,7 +6,7 @@ when_to_use: The kernel dies, the process is killed, or it runs out of memory; t
 
 # Get a research workflow running on Managed Workflows
 
-Help a researcher take a workflow that works on their laptop and run it on Managed Workflows: cloud-hosted single machines with up to 48 cores and 768 GB on CPU, or up to 8 GPUs. A job can run for up to 24 hours of execution (time in the queue does not count, and this can be extended), and it keeps running after the laptop closes.
+Help a researcher take a workflow that works on their laptop and run it on Managed Workflows: cloud-hosted single machines with large memory, many cores or GPUs; `compute_profiles()` lists what the deployment offers. A job can run for up to 24 hours of execution (time in the queue does not count, and this can be extended), and it keeps running after the laptop closes.
 
 This is for running their own code, not for contributing a template. Skip tests, linting, licence headers and repository layout unless they ask. Keep the code theirs: wrap it, don't rewrite it.
 
@@ -103,17 +103,7 @@ mw = ManagedWorkflowClient(name="mw")
 print(mw.compute_profiles())
 ```
 
-It prints one profile per line, CPU-only first, for example:
-
-```
-8x32            (8 vCPU / 32 GB)
-16x128          (16 vCPU / 128 GB)
-48x768          (48 vCPU / 768 GB)
-20x320x2a100    (20 vCPU / 320 GB / 2a100)
-160x1792x8h100  (160 vCPU / 1792 GB / 8h100)
-```
-
-The list depends on the deployment, so take the ids from the output, not from this example. Then upload with the machines from Step 2:
+It prints one profile per line, CPU-only first, as `<id>  (<vCPU> vCPU / <GB> GB[ / <GPUs>])`. The list depends on the deployment, so take the ids from this output, never from memory or from an example. `scale_probe.py` and `mw_sweep.py` read the same list, with the account named in their `ACCOUNT`. Then upload with the machines from Step 2:
 
 ```python
 fn = ManagedWorkflow(
@@ -121,10 +111,9 @@ fn = ManagedWorkflow(
     entrypoint="entrypoint.py",
     working_dir="./my_workflow/",
     runner="fleets",
-    sizes_map={                                                # from the fit in Step 4
-        "s": mw.compute_profile(cpu=8, memory=32),     # checked against the list
-        "m": "16x128",                                         # or a profile id as a string
-        "l": "48x768",
+    sizes_map={                                        # from the fit in Step 4
+        "s": mw.compute_profile(cpu=<vCPU>, memory=<GB>),  # looked up in the list
+        "m": "<profile id from compute_profiles()>",       # or the id as a string
     },
     default_size="s",
 )
@@ -158,7 +147,7 @@ It starts from `BASE` (default: the smallest tier) and shrinks one argument at a
 It prints an estimate, a time, a starting machine and a fallback for every tier, then two checks:
 
 - **Shape, per argument.** Along each argument, measured memory growth is compared with the formula's: "SHAPE WRONG along `norb` … grows 3× faster" means the formula weights that argument wrongly or misses an object that depends on it; memory that stays flat while the formula grows means the peak comes from something the formula leaves out. Fix `MEMORY_GB` with the researcher and run `python mw_sweep.py fit` before trusting larger tiers.
-- **Cores.** If the largest run used far fewer cores than it was granted, pick machines for memory only; `cores_granted` can exceed the profile's vCPU count (96 on `48x768`). If it kept the cores busy, it suggests `python mw_sweep.py compare m 8x32 16x128`: the same tier on both machines at once, reporting the speedup for the extra cores and whether memory grew with them (worker pools sized from the core count use more memory on a bigger machine). Climb for cores only if it says so.
+- **Cores.** If the largest run used far fewer cores than it was granted, pick machines for memory only; `cores_granted` can exceed the profile's vCPU count. If it kept the cores busy, it suggests `python mw_sweep.py compare m <smaller> <larger>` with two profile ids: the same tier on both machines at once, reporting the speedup for the extra cores and whether memory grew with them (worker pools sized from the core count use more memory on a bigger machine). Climb for cores only if it says so.
 
 **Optionally, check the research size directly.** `python mw_sweep.py --target l` runs tier `l` as a job on the smallest machine with an allocation check: the first numpy array above `--cap-gb` (default 4) is recorded with its shape, size and code line, and not allocated. It takes about as long as the setup before the big array. It answers "which object dominates at research size" in minutes, and gives a lower bound on the peak: arrays created outside numpy's `zeros`/`empty`/`ones`/`full`, or several large arrays alive at once, are not counted. Use the result to check the formula; size from the fit. Never run it locally: below-cap arrays are still allocated.
 
@@ -168,13 +157,13 @@ It prints an estimate, a time, a starting machine and a fallback for every tier,
 python mw_sweep.py climb m l
 ```
 
-It runs each tier on the machine the fit suggests, smallest first, adds each result to `runs.json` and refits before the next. A problem estimated above the largest machine still gets a try on the largest CPU profile (`48x768` today): estimates far out are crude and often high. On failure:
+It runs each tier on the machine the fit suggests, smallest first, adds each result to `runs.json` and refits before the next. A problem estimated above the largest machine still gets a try on the largest CPU profile in `compute_profiles()`: estimates far out are crude and often high. On failure:
 
-- **numpy `Unable to allocate X`**: X is read from the error, machines too small for it are skipped, and if X is above 768 GB it says so. Then work out with the researcher how to split or reshape the problem; *Bigger than one machine* in `sizing_guide.md` has the questions.
+- **numpy `Unable to allocate X`**: X is read from the error, machines too small for it are skipped, and if X is above the largest CPU profile's memory it says so. Then work out with the researcher how to split or reshape the problem; *Bigger than one machine* in `sizing_guide.md` has the questions.
 - **Killed with no traceback** (the machine ran out of memory): one retry on the next machine up, with the last heartbeat shown.
 - **Any other error**: it stops and prints the traceback. Fix it with the researcher; never resubmit it unchanged.
 
-`--from 16x128` starts the first tier on a given machine. Each profile it uses needs a size label in `sizes_map`; add one and re-upload under the same title if needed (existing jobs are unaffected).
+`--from <profile id>` starts the first tier on a given machine. Each profile it uses needs a size label in `sizes_map`; add one and re-upload under the same title if needed (existing jobs are unaffected).
 
 Every number you report must come from a real job: quote its `job_id` and the `metadata["resources"]` it returned, as `mw_sweep.py` prints them. If an upload or submission fails, show the researcher the error and stop. Never estimate what a run would have measured, or fill in a result that wasn't returned.
 
