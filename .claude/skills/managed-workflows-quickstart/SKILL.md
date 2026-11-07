@@ -91,7 +91,7 @@ Keep these in mind:
 - **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
-- **If the code fans work out**, size the pool from the profile the job got (the vCPU count in `get_compute_profile()`, for example 48 for `48x768`), not `os.cpu_count()`. The job can run on a larger node than its profile, so `os.sched_getaffinity(0)` and `os.cpu_count()` can report more cores than the job is allocated. Set `OMP_NUM_THREADS` and similar to cores ÷ workers before numpy is imported. Keep pool creation and anything else with side effects (such as `install_uploaded_wheels()`) under `if __name__ == "__main__":`, so that worker processes started with spawn or forkserver don't run it again.
+- **If the code fans work out**, size the pool from `os.sched_getaffinity(0)`, not `os.cpu_count()`. Set `OMP_NUM_THREADS` and similar to cores ÷ workers before numpy is imported. Keep pool creation and anything else with side effects (such as `install_uploaded_wheels()`) under `if __name__ == "__main__":`, so that worker processes started with spawn or forkserver don't run it again.
 
 Install the client (`pip install "qiskit-ibm-catalog>=0.22"`, the Managed Workflows client). Save their account once (they paste their own API key and instance CRN; never write them into files), and list the machines this deployment offers:
 
@@ -144,6 +144,8 @@ fn = mw.load("my-workflow")
 ## Step 4 — Measure, then climb
 
 Copy `mw_sweep.py` next to `scale_probe.py` and set `ACCOUNT`, `FUNCTION` and, if needed, `BASE` and `SWEEP_ARGS` in its edit block. It reads the machines from `mw.compute_profiles()`, submits the jobs, waits for them with `job.wait_for_final_state()`, collects `metadata["resources"]` into `runs.json` with each `job_id`, the profile the job reports and its `fleet_id`, and fits with `scale_probe.py`. Run it from the researcher's machine; job startup takes ~2–3 min.
+
+It writes each job id to `jobs.json` as soon as the job is submitted. If the laptop sleeps or the script stops, `python mw_sweep.py collect` waits for the jobs left behind and adds them to `runs.json`, and `python mw_sweep.py cancel` stops the ones not ended. It keeps at most `MAX_ACTIVE` (10) jobs active, and when the service answers 429 (50 active jobs per user, counting other workflows) it waits and retries instead of stopping half-way. A job still not done after `JOB_TIMEOUT_S` (2 h by default) is cancelled, so a stuck run does not keep using the allocation until the 24-hour limit; raise it before climbing to a tier that needs longer.
 
 **Measure small sizes first.**
 
