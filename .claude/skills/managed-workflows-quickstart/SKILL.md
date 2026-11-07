@@ -10,7 +10,7 @@ Help a researcher take a workflow that works on their laptop and run it on Manag
 
 This is for running their own code, not for contributing a template. Skip tests, linting, licence headers and repository layout unless they ask. Keep the code theirs: wrap it, don't rewrite it.
 
-Work through it conversationally, in four steps. Do not assume they know Qiskit Serverless.
+Work through it conversationally, in four steps. Do not assume they know Managed Workflows or Qiskit Functions.
 
 ## Step 1 — Understand the workflow and what they want to run
 
@@ -79,26 +79,26 @@ if __name__ == "__main__":
 
 `t.summary` holds `peak_gb` (the job's own memory counter on Managed Workflows, so it includes worker processes), `start_gb`, `wall_s`, `cores_used`, `cores_granted`, the `function_size` and `compute_profile` the job was given, and per-stage time. `alloc_check` is only set by `mw_sweep.py --target` (Step 4); leave it in. A heartbeat prints time and memory to `job.logs()` every five minutes. Add more `t.stage(...)` blocks to see which stage dominates.
 
-Jobs have no outbound network, so telemetry comes back through the job itself: `t.summary` in the result, `MW_TELEMETRY` JSON lines in the logs (`parse_logs(job.logs())` reads them), and a `telemetry-<run id>.json` file in the function's storage, named in `t.summary["telemetry_file"]`. To see runs in an OpenTelemetry backend, download the file with `serverless.file_download(name, fn)` and run `python mw_telemetry.py replay <file>` on your own machine; it sends one trace per run to the collector set in the usual `OTEL_EXPORTER_OTLP_*` variables.
+Jobs have no outbound network, so telemetry comes back through the job itself: `t.summary` in the result, `MW_TELEMETRY` JSON lines in the logs (`parse_logs(job.logs())` reads them), and a `telemetry-<run id>.json` file in the function's storage, named in `t.summary["telemetry_file"]`. To see runs in an OpenTelemetry backend, download the file with `mw.file_download(name, fn)` and run `python mw_telemetry.py replay <file>` on your own machine; it sends one trace per run to the collector set in the usual `OTEL_EXPORTER_OTLP_*` variables.
 
 Keep these in mind:
 
 - **`run_function` passes its arguments straight to their code.** The keyword arguments given to `fn.run(...)` must match their function's own parameters; only `function_size` is taken by the service.
-- **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects qiskit-serverless knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
+- **Arguments and results must be JSON-friendly**: numbers, strings, lists, dicts, and the Qiskit objects the client knows how to encode. `result` must be too, so convert arrays with `.tolist()`.
 - **Log progress** with `print(..., flush=True)` (or `t.log(...)`) once per iteration in long loops. With the heartbeat, a run that's slower than expected, or stuck, shows up in `job.logs()` early.
 - **numba-based code** (quimb, for example) needs `env_vars={"NUMBA_CACHE_DIR": "/tmp/numba_cache"}` on `QiskitFunction`, because site-packages is read-only.
 - **Use `/tmp` for scratch files.** `/function_user_data` is shared by all jobs of the function, if they need to pass files between jobs.
 - **No tokens in the code.** The job gets its backend through `get_runtime_service()`.
 - **If the code fans work out**, size the pool from `os.sched_getaffinity(0)`, not `os.cpu_count()`. Set `OMP_NUM_THREADS` and similar to cores ÷ workers before numpy is imported.
 
-Install the client (`pip install "qiskit-ibm-catalog>=0.22"`, which brings qiskit-serverless 0.38). Save their account once (they paste their own API key and instance CRN; never write them into files), and list the machines this deployment offers:
+Install the client (`pip install "qiskit-ibm-catalog>=0.22"`, the Managed Workflows client). Save their account once (they paste their own API key and instance CRN; never write them into files), and list the machines this deployment offers:
 
 ```python
-from qiskit_ibm_catalog import QiskitServerless, QiskitFunction
+from qiskit_ibm_catalog import ManagedWorkflowClient, ManagedWorkflow
 
-QiskitServerless.save_account(token="<API key>", instance="<CRN>", name="mw", overwrite=True)  # once
-serverless = QiskitServerless(name="mw")
-print(serverless.compute_profiles())
+ManagedWorkflowClient.save_account(token="<API key>", instance="<CRN>", name="mw", overwrite=True)  # once
+mw = ManagedWorkflowClient(name="mw")
+print(mw.compute_profiles())
 ```
 
 It prints one profile per line, CPU-only first, for example:
@@ -114,34 +114,34 @@ It prints one profile per line, CPU-only first, for example:
 The list depends on the deployment, so take the ids from the output, not from this example. Then upload with the machines from Step 2:
 
 ```python
-fn = QiskitFunction(
+fn = ManagedWorkflow(
     title="my-workflow",
     entrypoint="entrypoint.py",
     working_dir="./my_workflow/",
     runner="fleets",
     sizes_map={                                                # from the fit in Step 4
-        "s": serverless.compute_profile(cpu=8, memory=32),     # checked against the list
+        "s": mw.compute_profile(cpu=8, memory=32),     # checked against the list
         "m": "16x128",                                         # or a profile id as a string
         "l": "48x768",
     },
     default_size="s",
 )
-serverless.upload(fn)
-fn = serverless.load("my-workflow")
+mw.upload(fn)
+fn = mw.load("my-workflow")
 ```
 
-`compute_profile(...)` raises and prints the available profiles if nothing matches, and an upload naming an unregistered id is rejected the same way. Use a GPU profile only if *Would a GPU help?* in `sizing_guide.md` says so. Otherwise add a GPU run as a comparison in Step 4. Fleets is the default runner from qiskit-serverless 0.38; `runner="fleets"` is kept so older gateways get it too (Ray is deprecated).
+`compute_profile(...)` raises and prints the available profiles if nothing matches, and an upload naming an unregistered id is rejected the same way. Use a GPU profile only if *Would a GPU help?* in `sizing_guide.md` says so. Otherwise add a GPU run as a comparison in Step 4. Fleets is the default runner from qiskit-ibm-catalog 0.22; `runner="fleets"` is kept so older gateways get it too (Ray is deprecated).
 
-**Extra packages.** The runtime image already ships Qiskit and many common packages (`serverless.dependencies_versions()` lists them); anything else comes as a wheel you upload. `dependencies=` on `QiskitFunction` no longer installs anything (it is ignored and gives a `DeprecationWarning`), so don't use it.
+**Extra packages.** The runtime image already ships Qiskit and many common packages (`mw.dependencies_versions()` lists them); anything else comes as a wheel you upload. `dependencies=` on `ManagedWorkflow` no longer installs anything (it is ignored and gives a `DeprecationWarning`), so don't use it.
 
-1. Check what the image already has: `print(serverless.dependency_report(["qiskit-aer==0.17.2", "quimb"]))`. Each requirement is shown as already present, to bring as a wheel, or clashing with the version the image ships. Bring only what it marks to bring, and use the image's version where it clashes.
+1. Check what the image already has: `print(mw.dependency_report(["qiskit-aer==0.17.2", "quimb"]))`. Each requirement is shown as already present, to bring as a wheel, or clashing with the version the image ships. Bring only what it marks to bring, and use the image's version where it clashes.
 2. Get a wheel for each one: `pip download <pkg>==<version> --no-deps --only-binary=:all: --platform manylinux2014_x86_64 --python-version <the image's Python> -d wheels/`, or `pip wheel --no-deps -w wheels/ <path>` for pure-Python code. The install runs with `--no-deps`, so add a wheel for every dependency the report doesn't show as present.
-3. After `serverless.upload(fn)`: `serverless.add_wheels(fn, ["wheels/*.whl"])`. They stay in the function's storage across re-uploads; `serverless.list_wheels(fn)` shows them, and to change one, `serverless.remove_wheels(fn, [name])` then `add_wheels` the new build.
+3. After `mw.upload(fn)`: `mw.add_wheels(fn, ["wheels/*.whl"])`. They stay in the function's storage across re-uploads; `mw.list_wheels(fn)` shows them, and to change one, `mw.remove_wheels(fn, [name])` then `add_wheels` the new build.
 4. The entrypoint calls `install_uploaded_wheels()` before importing them (as in the template above). It installs into `/tmp/site` on every run, which adds a little startup time.
 
 ## Step 4 — Measure, then climb
 
-Copy `mw_sweep.py` next to `scale_probe.py` and set `ACCOUNT`, `FUNCTION` and, if needed, `BASE` and `SWEEP_ARGS` in its edit block. It reads the machines from `serverless.compute_profiles()`, submits the jobs, waits for them with `job.wait_for_final_state()`, collects `metadata["resources"]` into `runs.json` with each `job_id`, the profile the job reports and its `fleet_id`, and fits with `scale_probe.py`. Run it from the researcher's machine; job startup takes ~2–3 min.
+Copy `mw_sweep.py` next to `scale_probe.py` and set `ACCOUNT`, `FUNCTION` and, if needed, `BASE` and `SWEEP_ARGS` in its edit block. It reads the machines from `mw.compute_profiles()`, submits the jobs, waits for them with `job.wait_for_final_state()`, collects `metadata["resources"]` into `runs.json` with each `job_id`, the profile the job reports and its `fleet_id`, and fits with `scale_probe.py`. Run it from the researcher's machine; job startup takes ~2–3 min.
 
 **Measure small sizes first.**
 

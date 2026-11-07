@@ -40,8 +40,8 @@ argument the formula weights wrongly or leaves out.
 Every number printed comes from a job: its id and ``metadata["resources"]`` are
 kept in ``runs.json``. The entrypoint must pass ``alloc_check`` to ``telemetry()``
 for ``--target`` (SKILL.md, Step 3). Machines are the CPU profiles the deployment
-lists in ``serverless.compute_profiles()``. Needs ``qiskit-ibm-catalog>=0.22``
-(qiskit-serverless 0.38); older clients fall back to the profiles in ``scale_probe``.
+lists in ``mw.compute_profiles()``. Needs ``qiskit-ibm-catalog>=0.22``; older clients fall back to the
+profiles in ``scale_probe``.
 """
 
 import json
@@ -54,7 +54,7 @@ import scale_probe as sp
 
 # ============================ EDIT THIS BLOCK ============================
 
-ACCOUNT = "mw"  # the name used with QiskitServerless.save_account
+ACCOUNT = "mw"  # the name used with ManagedWorkflowClient.save_account
 FUNCTION = "my-workflow"  # the title used at upload
 BASE = None  # a problem to sweep down from; None uses the smallest tier in TIERS
 SWEEP_ARGS = None  # arguments that change cost; None uses every numeric argument in BASE
@@ -98,11 +98,11 @@ def _save_run(entry):
 
 
 def _function():
-    from qiskit_ibm_catalog import QiskitServerless  # pylint: disable=import-outside-toplevel
+    from qiskit_ibm_catalog import ManagedWorkflowClient  # pylint: disable=import-outside-toplevel
 
-    serverless = QiskitServerless(name=ACCOUNT)
-    use_deployment_profiles(serverless)
-    fn = serverless.load(FUNCTION)
+    mw = ManagedWorkflowClient(name=ACCOUNT)
+    use_deployment_profiles(mw)
+    fn = mw.load(FUNCTION)
     if fn is None:
         sys.exit(f"mw_sweep: function {FUNCTION!r} not found; upload it first (Step 3)")
     return fn
@@ -115,13 +115,13 @@ def _num(value):
         return None
 
 
-def use_deployment_profiles(serverless):
+def use_deployment_profiles(client):
     """Replace ``scale_probe.CPU_PROFILES`` with the deployment's CPU-only profiles.
 
     Keeps the built-in list when the client has no ``compute_profiles()`` or the call fails.
     """
     try:
-        catalog = list(serverless.compute_profiles())
+        catalog = list(client.compute_profiles())
     except Exception as exc:  # pylint: disable=broad-except
         _say(f"compute_profiles() unavailable ({exc.__class__.__name__}); using built-in list")
         return sp.CPU_PROFILES

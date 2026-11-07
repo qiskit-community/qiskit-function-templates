@@ -89,7 +89,7 @@ For a workflow not in the table, answer the four questions above and pick the cl
 
 ## Would a GPU help?
 
-The share of time spent in a stage that has a GPU version caps the gain (per-stage times from `mw_telemetry` show it): if 60% of the time is portable, even an infinitely fast GPU gives at most 1 / 0.4 = 2.5×. A GPU is a good default for a tier when all of the following hold. When only some do — a smaller stage would run on a GPU but the stage that dominates at the largest tier would not — keep the tier on a CPU profile and add a GPU run to the sweep as a comparison (for example, `m` on both `16x128` and `24x120x1l40s`; take the GPU ids from `serverless.compute_profiles()`). The sweep shows whether it pays off; that is an experiment worth running, not a reason to skip GPUs.
+The share of time spent in a stage that has a GPU version caps the gain (per-stage times from `mw_telemetry` show it): if 60% of the time is portable, even an infinitely fast GPU gives at most 1 / 0.4 = 2.5×. A GPU is a good default for a tier when all of the following hold. When only some do — a smaller stage would run on a GPU but the stage that dominates at the largest tier would not — keep the tier on a CPU profile and add a GPU run to the sweep as a comparison (for example, `m` on both `16x128` and `24x120x1l40s`; take the GPU ids from `mw.compute_profiles()`). The sweep shows whether it pays off; that is an experiment worth running, not a reason to skip GPUs.
 
 - **The share is high, and the GPU-portable stage is the one that grows** — at least ~0.6 of the run, and the stage that dominates at the largest tier (from the formula) is that same stage.
 - **The dominant stage has a GPU path** — dense linear algebra, large tensor contractions, mean-field chemistry and full-state simulation usually have one (often as a separate GPU build of the same library). Combinatorial and bit-string-heavy code, selected-CI solvers, configuration recovery, approximate-state simulators, transpilation and plain Python loops usually do not — for those, more cores or memory are what help. Check the library's documentation rather than assuming.
@@ -125,7 +125,7 @@ If a real run on the largest profile runs out of memory, work out the reshaping 
 
 Whatever they choose, check the reshaped version against a size that still fits in one piece, then keep climbing.
 
-Splitting into jobs uses the function's user storage. Every job of the function can read and write it at `/function_user_data` inside a job (job-only scratch lives in `/job_user_data`), and the notebook reaches it with `serverless.file_upload`, `files` and `file_download`. Independent pieces can run as separate jobs that write their results there and combine them at the end:
+Splitting into jobs uses the function's user storage. Every job of the function can read and write it at `/function_user_data` inside a job (job-only scratch lives in `/job_user_data`), and the notebook reaches it with `mw.file_upload`, `files` and `file_download`. Independent pieces can run as separate jobs that write their results there and combine them at the end:
 
 - **SQD batches** — one job per batch or group of batches, writing each batch's energy and occupancies; a final job (or the notebook) combines them.
 - **Circuit-cutting subexperiments** — generate once, run the subexperiments in parallel jobs, reconstruct at the end.
