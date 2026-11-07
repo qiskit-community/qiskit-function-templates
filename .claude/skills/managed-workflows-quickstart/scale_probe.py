@@ -74,6 +74,8 @@ TIME_UNITS = None  # optional: lambda p: relative amount of work, e.g. p["iterat
 
 VALID_LABELS = ("S", "M", "L", "XL")
 HERE = os.path.dirname(os.path.abspath(__file__))
+# (id, vCPU, GB), smallest first. Offline default only: mw_sweep.py replaces it with the
+# CPU profiles the deployment lists in ``serverless.compute_profiles()``.
 CPU_PROFILES = [("8x32", 8, 32), ("16x128", 16, 128), ("48x768", 48, 768)]
 HEADROOM = 1.3
 LAPTOP_GB = 12  # estimate x headroom at or below this fits a typical laptop
@@ -129,9 +131,10 @@ def _rungs(need_gb, cores):
     """Smallest CPU profile that fits, plus the next one up as a fallback."""
     if need_gb <= LAPTOP_GB and cores <= 8:
         return "laptop", CPU_PROFILES[0][0]
-    fits = [p for p in CPU_PROFILES if p[2] >= need_gb and p[1] >= min(cores, 48)]
+    largest = CPU_PROFILES[-1]
+    fits = [p for p in CPU_PROFILES if p[2] >= need_gb and p[1] >= min(cores, largest[1])]
     if not fits:
-        return "48x768 (try it)", None
+        return f"{largest[0]} (try it)", None
     first = CPU_PROFILES.index(fits[0])
     fallback = CPU_PROFILES[first + 1][0] if first + 1 < len(CPU_PROFILES) else None
     return fits[0][0], fallback

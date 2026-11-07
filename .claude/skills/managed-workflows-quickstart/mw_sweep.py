@@ -39,7 +39,9 @@ argument the formula weights wrongly or leaves out.
 
 Every number printed comes from a job: its id and ``metadata["resources"]`` are
 kept in ``runs.json``. The entrypoint must pass ``alloc_check`` to ``telemetry()``
-for ``--target`` (SKILL.md, Step 3). Needs ``qiskit-ibm-catalog``.
+for ``--target`` (SKILL.md, Step 3). Machines are the CPU profiles the deployment
+lists in ``serverless.compute_profiles()``. Needs ``qiskit-ibm-catalog>=0.22``
+(qiskit-serverless 0.38); older clients fall back to the profiles in ``scale_probe``.
 """
 
 import json
@@ -99,23 +101,86 @@ def _function():
     from qiskit_ibm_catalog import QiskitServerless  # pylint: disable=import-outside-toplevel
 
     serverless = QiskitServerless(name=ACCOUNT)
+    use_deployment_profiles(serverless)
     fn = serverless.load(FUNCTION)
     if fn is None:
         sys.exit(f"mw_sweep: function {FUNCTION!r} not found; upload it first (Step 3)")
     return fn
 
 
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def use_deployment_profiles(serverless):
+    """Replace ``scale_probe.CPU_PROFILES`` with the deployment's CPU-only profiles.
+
+    Keeps the built-in list when the client has no ``compute_profiles()`` or the call fails.
+    """
+    try:
+        catalog = list(serverless.compute_profiles())
+    except Exception as exc:  # pylint: disable=broad-except
+        _say(f"compute_profiles() unavailable ({exc.__class__.__name__}); using built-in list")
+        return sp.CPU_PROFILES
+    cpu = []
+    for prof in catalog:
+        cores, mem = _num(getattr(prof, "cpu", None)), _num(getattr(prof, "memory", None))
+        if getattr(prof, "gpu", None) or cores is None or mem is None:
+            continue
+        cpu.append((prof.compute_profile_id, int(cores), int(mem) if mem.is_integer() else mem))
+    if cpu:
+        sp.CPU_PROFILES = sorted(cpu, key=lambda p: (p[2], p[1]))
+    return sp.CPU_PROFILES
+
+
 def _profile_of(fn, label):
-    sizes = {k.lower(): v for k, v in (getattr(fn, "sizes_map", None) or {}).items()}
+    sizes = {k.lower(): str(v) for k, v in (getattr(fn, "sizes_map", None) or {}).items()}
     return sizes.get(label.lower(), label)
 
 
 def _label_for(fn, profile):
     """Size label in the function's sizes_map that maps to a profile, if any."""
     for label, prof in (getattr(fn, "sizes_map", None) or {}).items():
-        if prof == profile:
+        if str(prof) == profile:  # a value can be a ComputeProfile; str() is its id
             return label
     return None
+
+
+def _record(job, problem, payload, profile, **extra):
+    """One runs.json entry; the profile the job reports wins over the sizes_map lookup."""
+    entry = {
+        "problem": problem,
+        "resources": payload,
+        "job_id": job.job_id,
+        "profile": payload.get("compute_profile") or profile,
+        **extra,
+    }
+    fleet = getattr(job, "fleet_id", None)
+    if fleet:
+        entry["fleet_id"] = fleet
+    return entry
+
+
+def _wait(job):
+    """Final status of a job: the client's own wait if it has one, else a polling loop."""
+    if hasattr(job, "wait_for_final_state"):
+        return job.wait_for_final_state()  # backs off and retries short errors itself
+    failures = 0
+    while True:
+        try:
+            status = job.status()
+            failures = 0
+        except Exception as exc:  # pylint: disable=broad-except
+            failures += 1
+            if failures >= 10:
+                raise RuntimeError(f"cannot reach job {job.job_id}: {exc}") from exc
+            status = None
+        if status in ("DONE", "ERROR", "CANCELED"):
+            return status
+        time.sleep(POLL_S)
 
 
 # ------------------------------------------------------------- outcomes
@@ -137,19 +202,7 @@ def outcome(job):  # pylint: disable=too-many-return-statements
     kind is ``ok`` (payload = resources), ``alloc`` (GB, shape, dtype, text),
     ``killed`` (text) or ``error`` (traceback text).
     """
-    failures = 0
-    while True:
-        try:
-            status = job.status()
-            failures = 0
-        except Exception as exc:  # pylint: disable=broad-except
-            failures += 1
-            if failures >= 10:
-                raise RuntimeError(f"cannot reach job {job.job_id}: {exc}") from exc
-            status = None
-        if status in ("DONE", "ERROR", "CANCELED"):
-            break
-        time.sleep(POLL_S)
+    status = _wait(job)
     if status == "DONE":
         res = job.result()
         if isinstance(res, dict) and "resources" in (res.get("metadata") or {}):
@@ -266,15 +319,7 @@ def sweep():
     for name, problem, job in jobs:
         kind, payload = outcome(job)
         if kind == "ok":
-            _save_run(
-                {
-                    "problem": problem,
-                    "resources": payload,
-                    "job_id": job.job_id,
-                    "sweep": name,
-                    "profile": _profile_of(fn, SWEEP_SIZE),
-                }
-            )
+            _save_run(_record(job, problem, payload, _profile_of(fn, SWEEP_SIZE), sweep=name))
             _say(
                 f"  {name:<14} {job.job_id[:8]}  peak {payload['peak_gb']} GB "
                 f"{payload['wall_s']} s  cores {payload['cores_used']}/{payload['cores_granted']}"
@@ -428,15 +473,7 @@ def climb(labels, start=None):
             _say(f"{label}: {job.job_id} on {profile} (estimate {row['estimate_gb']:.3g} GB)")
             kind, payload = outcome(job)
             if kind == "ok":
-                _save_run(
-                    {
-                        "problem": problem,
-                        "resources": payload,
-                        "job_id": job.job_id,
-                        "tier": label,
-                        "profile": profile,
-                    }
-                )
+                _save_run(_record(job, problem, payload, profile, tier=label))
                 _say(
                     f"{label}: peak {payload['peak_gb']} GB, {payload['wall_s']} s, cores "
                     f"{payload['cores_used']}/{payload['cores_granted']} - added, refitting"
@@ -496,9 +533,10 @@ def compare_verdict(run_a, run_b):
     return line
 
 
-def compare(label, profiles):
+def compare(label, profiles=None):
     """Run tier ``label`` on each profile at once; report time and cores from the jobs."""
     fn = _function()
+    profiles = profiles or [p[0] for p in sp.CPU_PROFILES[:2]]
     problem = sp.TIERS[label]
     jobs = []
     for profile in profiles:
@@ -515,16 +553,7 @@ def compare(label, profiles):
         if kind != "ok":
             _say(f"compare {label}: {kind.upper()} on {profile}: {_short(payload)}")
             continue
-        _save_run(
-            {
-                "problem": problem,
-                "resources": payload,
-                "job_id": job.job_id,
-                "tier": label,
-                "profile": profile,
-                "compare": True,
-            }
-        )
+        _save_run(_record(job, problem, payload, profile, tier=label, compare=True))
         done.append((profile, payload))
         _say(
             f"compare {label}: {profile:<8} {payload['wall_s']} s, cores "
@@ -596,7 +625,7 @@ def main(argv):
         labels = [a for a in argv[1:] if a in sp.TIERS]
         climb(labels or list(sp.TIERS), start)
     elif argv[0] == "compare":
-        compare(argv[1], argv[2:] or [p[0] for p in sp.CPU_PROFILES[:2]])
+        compare(argv[1], argv[2:] or None)
     elif argv[0] == "--target":
         cap = float(argv[argv.index("--cap-gb") + 1]) if "--cap-gb" in argv else 4.0
         size_label = argv[argv.index("--size") + 1] if "--size" in argv else None

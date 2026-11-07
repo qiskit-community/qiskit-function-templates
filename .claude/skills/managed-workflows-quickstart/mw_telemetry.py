@@ -116,6 +116,18 @@ def _cores_granted():
     return os.cpu_count()
 
 
+def _sizing():
+    """Size label and compute profile the job was given (Fleets jobs), else None.
+
+    Read from the variables behind ``qiskit_serverless.get_function_size()`` and
+    ``get_compute_profile()``, so this also runs locally without qiskit-serverless.
+    """
+    return {
+        "function_size": os.environ.get("ENV_JOB_FUNCTION_SIZE") or None,
+        "compute_profile": os.environ.get("ENV_JOB_COMPUTE_PROFILE") or None,
+    }
+
+
 def _fmt(value):
     return round(value, 2) if value is not None else None
 
@@ -346,10 +358,13 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
         self._t0, self._c0 = time.perf_counter(), _cpu_s()
         self._start_gb = current_gb()
         threading.Thread(target=self._beat, daemon=True).start()
+        sizing = _sizing()
         self.log(
-            f"start, cores granted {_cores_granted()}",
+            f"start, cores granted {_cores_granted()}, "
+            f"profile {sizing['compute_profile'] or 'unknown'}",
             event="start",
             cores_granted=_cores_granted(),
+            **sizing,
         )
         if self._watch:
             self._watch.install()
@@ -375,6 +390,7 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
             "wall_s": round(wall, 1),
             "cores_used": round((_cpu_s() - self._c0) / wall, 1) if wall else None,
             "cores_granted": _cores_granted(),
+            **_sizing(),
             "stages": self.stages,
             "source": self._source(),
         }
