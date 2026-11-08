@@ -197,8 +197,10 @@ def submit(fn, problem, function_size, **meta):
             if not _is_limit_error(exc) or attempt == 29:
                 raise
             if attempt == 0:
-                _say("  active job limit reached (429); retrying every minute. Jobs of other "
-                     "workflows count too: `mw_sweep.py cancel` stops this script's jobs")
+                _say(
+                    "  active job limit reached (429); retrying every minute. Jobs of other "
+                    "workflows count too: `mw_sweep.py cancel` stops this script's jobs"
+                )
             time.sleep(POLL_S)
     _note_job(job, problem=problem, function_size=function_size, final=None, **meta)
     return job
@@ -226,8 +228,10 @@ def _wait(job):
         try:
             status = job.wait_for_final_state(timeout=remaining)  # backs off, retries short errors
         except TimeoutError:
-            _say(f"  {job.job_id[:8]}: not done after {JOB_TIMEOUT_S / 3600:.1f} h; cancelling "
-                 f"(raise JOB_TIMEOUT_S for long tiers): {job.cancel()}")
+            _say(
+                f"  {job.job_id[:8]}: not done after {JOB_TIMEOUT_S / 3600:.1f} h; cancelling "
+                f"(raise JOB_TIMEOUT_S for long tiers): {job.cancel()}"
+            )
             status = job.wait_for_final_state(timeout=600)
         _note_job(job, final=status)
         return status
@@ -641,8 +645,13 @@ def target(label, cap_gb=4.0, max_hits=1, size_label=None):
     fn = _function()
     problem = sp.TIERS[label]
     size_label = size_label or next(iter(getattr(fn, "sizes_map", None) or {"s": ""}))
-    job = submit(fn, {**problem, "alloc_check": {"cap_gb": cap_gb, "max_hits": max_hits}},
-                 size_label, tier=label, target=True)
+    job = submit(
+        fn,
+        {**problem, "alloc_check": {"cap_gb": cap_gb, "max_hits": max_hits}},
+        size_label,
+        tier=label,
+        target=True,
+    )
     _say(f"--target {label}: {job.job_id} on {_profile_of(fn, size_label)}, cap {cap_gb} GB")
     kind, payload = outcome(job)
     if kind != "ok":
@@ -696,9 +705,18 @@ def collect():
         kind, payload = outcome(job)
         extra = {k: meta[k] for k in ("sweep", "tier", "compare") if k in meta}
         if kind == "ok" and jid not in seen and not meta.get("target"):
-            _save_run(_record(job, meta.get("problem", {}), payload,
-                              meta.get("profile") or meta.get("function_size"), **extra))
-            _say(f"  {jid[:8]} {extra}: peak {payload['peak_gb']} GB, {payload['wall_s']} s - added")
+            _save_run(
+                _record(
+                    job,
+                    meta.get("problem", {}),
+                    payload,
+                    meta.get("profile") or meta.get("function_size"),
+                    **extra,
+                )
+            )
+            _say(
+                f"  {jid[:8]} {extra}: peak {payload['peak_gb']} GB, {payload['wall_s']} s - added"
+            )
         elif kind != "ok":
             _say(f"  {jid[:8]} {extra}: {kind.upper()}: {_short(payload)}")
 

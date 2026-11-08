@@ -94,8 +94,14 @@ LAPTOP_GB = 12  # estimate x headroom at or below this fits a typical laptop
 MIN_ADDED_GB = 0.05  # a run adding less than this over the overhead measures only imports
 # --check runs on the researcher's own machine: keep it a smoke test that cannot take it over.
 LOCAL_CAPS = {"wall_s": 120, "gb": 4.0, "workers": 2}
-THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
-               "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "RAYON_NUM_THREADS")
+THREAD_VARS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "RAYON_NUM_THREADS",
+)
 
 
 def _validate():
@@ -161,7 +167,9 @@ def load_profiles(client=None):
         return CPU_PROFILES
     try:
         if client is None:
-            from qiskit_ibm_catalog import ManagedWorkflowClient  # pylint: disable=import-outside-toplevel
+            from qiskit_ibm_catalog import (
+                ManagedWorkflowClient,
+            )  # pylint: disable=import-outside-toplevel
 
             client = ManagedWorkflowClient(name=ACCOUNT)
         catalog = list(client.compute_profiles())
@@ -374,28 +382,32 @@ def check(label, runs_file):
             "already busy (an earlier run still going?). Not starting a local check."
         )
     problem = _local_problem(label)
-    env = {**os.environ, **{var: "1" for var in THREAD_VARS},
-           "MW_LOCAL_WORKERS": str(LOCAL_CAPS["workers"])}
+    env = {
+        **os.environ,
+        **{var: "1" for var in THREAD_VARS},
+        "MW_LOCAL_WORKERS": str(LOCAL_CAPS["workers"]),
+    }
     if _group_gb(os.getpid()) is None:
         print("note: psutil not installed, so the memory cap is not enforced; the time cap is")
     with tempfile.TemporaryDirectory() as tmp:
         out = os.path.join(tmp, "summary.json")
         cmd = [sys.executable, os.path.abspath(__file__), "_child", json.dumps(problem), out]
-        proc = subprocess.Popen(cmd, env=env, start_new_session=True)  # own process group
-        start, stopped = time.monotonic(), None
-        while proc.poll() is None:
-            elapsed = time.monotonic() - start
-            gb = _group_gb(proc.pid)
-            if elapsed > LOCAL_CAPS["wall_s"]:
-                stopped = f"over {LOCAL_CAPS['wall_s']} s"
-            elif gb is not None and gb > LOCAL_CAPS["gb"]:
-                stopped = f"over {LOCAL_CAPS['gb']} GB ({gb:.1f} GB)"
-            if stopped:
-                _kill_group(proc)
-                break
-            time.sleep(0.5)
-        proc.wait()
-        _kill_group(proc)  # workers left behind by a child that exited early
+        # own process group, so the whole tree (pool workers included) can be killed
+        with subprocess.Popen(cmd, env=env, start_new_session=True) as proc:
+            start, stopped = time.monotonic(), None
+            while proc.poll() is None:
+                elapsed = time.monotonic() - start
+                gb = _group_gb(proc.pid)
+                if elapsed > LOCAL_CAPS["wall_s"]:
+                    stopped = f"over {LOCAL_CAPS['wall_s']} s"
+                elif gb is not None and gb > LOCAL_CAPS["gb"]:
+                    stopped = f"over {LOCAL_CAPS['gb']} GB ({gb:.1f} GB)"
+                if stopped:
+                    _kill_group(proc)
+                    break
+                time.sleep(0.5)
+            proc.wait()
+            _kill_group(proc)  # workers left behind by a child that exited early
         if stopped or not os.path.exists(out):
             why = stopped or f"exit code {proc.returncode}"
             sys.exit(
