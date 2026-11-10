@@ -156,21 +156,21 @@ A short notebook showing a user how to deploy and run the function. Authenticati
 must use **placeholders, never real credentials**:
 
 ```python
-from qiskit_ibm_catalog import QiskitServerless
+from qiskit_ibm_catalog import ManagedWorkflowClient
 token = "MY_TOKEN"
 instance = "MY_INSTANCE"
-serverless = QiskitServerless(token=token, instance=instance)
+serverless = ManagedWorkflowClient(token=token, instance=instance)
 ```
 
 Then upload the function and run it with a small example. These templates are
 **custom functions** — the uploader owns the whole definition, unlike a provider
-function where the maintainer registers it. Upload with `QiskitFunction` and run the
+function where the maintainer registers it. Upload with `ManagedWorkflow` and run the
 returned handle:
 
 ```python
-from qiskit_ibm_catalog import QiskitFunction
+from qiskit_ibm_catalog import ManagedWorkflow
 
-template = QiskitFunction(
+template = ManagedWorkflow(
     title="<name>_template",
     entrypoint="<name>_entrypoint.py",
     working_dir="./source_files/",   # everything here is uploaded
@@ -195,20 +195,21 @@ a placeholder.
 heavy enough to care about CPU/memory, or scales with a bigger machine (as a
 parallel fan-out does — see **Parallelism**).
 
-If you do add it, declare the catalog **at upload time** on the `QiskitFunction`
+If you do add it, declare the catalog **at upload time** on the `ManagedWorkflow`
 (these are custom functions, so the catalog lives in the function definition, not in
 a separate deploy script):
 
 ```python
-# Label -> compute profile. Labels are yours to choose; the right-hand side is a
-# Fleets compute profile "<cpu>x<memory_GB>" (e.g. CPU-only profiles below).
+# Label -> compute profile. Labels are yours to choose; look the profiles up in the
+# deployment's catalog instead of hard-coding ids (`print(serverless.compute_profiles())`
+# lists them). A raw id string such as "8x32" is also accepted.
 SIZES_MAP = {
-    "s": "8x32",     # 8 CPU,  32 GB
-    "m": "16x128",   # 16 CPU, 128 GB
-    "l": "48x768",   # 48 CPU, 768 GB
+    "s": serverless.compute_profile(cpu=8, memory=32),
+    "m": serverless.compute_profile(cpu=16, memory=128),
+    "l": serverless.compute_profile(cpu=48, memory=768),
 }
 
-template = QiskitFunction(
+template = ManagedWorkflow(
     title="<name>_template",
     entrypoint="<name>_entrypoint.py",
     working_dir="./source_files/",
