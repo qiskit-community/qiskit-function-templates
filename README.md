@@ -16,14 +16,6 @@
 
 ----------------------------------------------------------------------------------------------------
 
-> [!IMPORTANT]
-> **Pending release.** These templates have been updated to the upcoming
-> `qiskit-serverless` 0.38.0 and `qiskit-ibm-catalog` 0.22.0 releases. They use the
-> renamed client classes (`ManagedWorkflowClient`, `FunctionsCatalog`,
-> `ManagedWorkflow`) and assume the Fleets runner default and the `dependencies=`
-> deprecation. Running the notebooks against earlier releases will fail on import.
-> Do not merge or publish until both releases are out.
-
 ### About
 
 This repository hosts Qiskit Function templates and template implementations powered by [`qiskit`](https://github.com/Qiskit/qiskit) and [`qiskit-serverless`](https://github.com/Qiskit/qiskit-serverless).

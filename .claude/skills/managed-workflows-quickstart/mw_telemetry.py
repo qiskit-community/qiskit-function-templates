@@ -37,7 +37,7 @@ through channels the service already has:
 * one ``MW_TELEMETRY {...}`` JSON line per event in the logs, read back with
   ``parse_logs(job.logs())``;
 * a ``telemetry-<run id>.json`` file in the function's storage with every sample,
-  fetched afterwards with ``serverless.file_download(name, function)``.
+  fetched afterwards with ``mw.file_download(name, function)``.
 
 With ``telemetry(alloc_check={"cap_gb": 4, "max_hits": 3})`` the run becomes an
 allocation check, which ``mw_sweep.py --target`` submits as a job: each numpy array-creation call
@@ -114,6 +114,18 @@ def _cores_granted():
     if hasattr(os, "sched_getaffinity"):
         return len(os.sched_getaffinity(0))
     return os.cpu_count()
+
+
+def _sizing():
+    """Size label and compute profile the job was given (Fleets jobs), else None.
+
+    Read from the variables behind the in-job helpers ``get_function_size()`` and
+    ``get_compute_profile()``, so this also runs locally without the client installed.
+    """
+    return {
+        "function_size": os.environ.get("ENV_JOB_FUNCTION_SIZE") or None,
+        "compute_profile": os.environ.get("ENV_JOB_COMPUTE_PROFILE") or None,
+    }
 
 
 def _fmt(value):
@@ -346,10 +358,13 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
         self._t0, self._c0 = time.perf_counter(), _cpu_s()
         self._start_gb = current_gb()
         threading.Thread(target=self._beat, daemon=True).start()
+        sizing = _sizing()
         self.log(
-            f"start, cores granted {_cores_granted()}",
+            f"start, cores granted {_cores_granted()}, "
+            f"profile {sizing['compute_profile'] or 'unknown'}",
             event="start",
             cores_granted=_cores_granted(),
+            **sizing,
         )
         if self._watch:
             self._watch.install()
@@ -375,6 +390,7 @@ class Telemetry:  # pylint: disable=too-many-instance-attributes
             "wall_s": round(wall, 1),
             "cores_used": round((_cpu_s() - self._c0) / wall, 1) if wall else None,
             "cores_granted": _cores_granted(),
+            **_sizing(),
             "stages": self.stages,
             "source": self._source(),
         }

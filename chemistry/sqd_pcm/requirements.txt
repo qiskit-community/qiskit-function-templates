@@ -1,9 +1,8 @@
 # Versions pinned to match the Fleets runtime image
 # (qiskit-serverless/docker-images/requirements-dynamic-dependencies.txt), so
 # local development and testing run against the same stack that executes the
-# function on Fleets. Update these together with that file. The baked versions
-# are bumping for the 0.38.0 image, so re-sync these pins with that file before
-# this PR merges.
+# function on Fleets. Update these together with that file (in sync with the
+# 0.38.0 image).
 
 # qiskit ecosystem
 qiskit_addon_sqd==0.13.1

@@ -15,7 +15,7 @@
 Copy this file next to the research code and edit the block below. Three modes::
 
     python scale_probe.py --estimate        # formula only, nothing runs (a lower bound)
-    python scale_probe.py --check s         # run tier s once locally: does it run, and how big
+    python scale_probe.py --check           # run SMOKE once locally, capped: does the code run
     python scale_probe.py runs.json         # fit measured runs and size every tier
 
 ``runs.json`` is a list of ``{"problem": {...}, "resources": {...}}`` entries, where
@@ -23,6 +23,12 @@ Copy this file next to the research code and edit the block below. Three modes::
 runs normally come from small jobs on Managed Workflows (Step 3 of SKILL.md), so
 they are measured on the same machines, libraries and memory accounting as the
 real runs; ``--check`` appends its local run to the same file.
+
+``--check`` is a smoke test, not a measurement: it runs ``SMOKE`` (or a tier, if it
+fits the caps) in a child process group at the lowest priority, with BLAS threads
+and ``WORKERS_ARG`` capped, and kills the whole group, worker processes included,
+at ``LOCAL_CAPS["wall_s"]`` seconds or ``LOCAL_CAPS["gb"]`` GB. It refuses to start
+on a machine that is already busy. Size tiers on Managed Workflows, not here.
 
 The fit is ``peak = overhead + k * MEMORY_GB(problem)`` for memory and
 ``time = t0 * (TIME_UNITS / u0) ** a`` for time. The formula gives the shape, the
@@ -34,12 +40,13 @@ import json
 import math
 import os
 import sys
+import time
 
 # ============================ EDIT THIS BLOCK ============================
 
 
 def work(**problem):
-    """EDIT: run THEIR workflow (QPU mocked) on one problem, for --check.
+    """EDIT: run THEIR workflow (QPU mocked) on one problem, for --check (SMOKE by default).
 
     Import and call the researcher's own functions; never a stand-in that imitates
     them. Use the same entrypoint code the cloud jobs run, if there is one.
@@ -49,6 +56,10 @@ def work(**problem):
 
     return run(**problem)
 
+
+# EDIT: the smallest problem that still runs every stage, in seconds; what --check runs.
+SMOKE = {"n": 500, "n_vectors": 4, "workers": 1}
+WORKERS_ARG = "workers"  # EDIT: argument that sets processes/threads, or None; --check caps it
 
 TIERS = {  # labels must be s, m, l or xl; the problems the researcher wants to run
     "s": {"n": 4000, "n_vectors": 20, "workers": 1},
@@ -74,15 +85,32 @@ TIME_UNITS = None  # optional: lambda p: relative amount of work, e.g. p["iterat
 
 VALID_LABELS = ("S", "M", "L", "XL")
 HERE = os.path.dirname(os.path.abspath(__file__))
-CPU_PROFILES = [("8x32", 8, 32), ("16x128", 16, 128), ("48x768", 48, 768)]
+ACCOUNT = None  # the name used with ManagedWorkflowClient.save_account; None = default account
+# (id, vCPU, GB) of the deployment's CPU profiles, smallest first, read from
+# ``ManagedWorkflowClient().compute_profiles()`` by load_profiles(); never hard-coded.
+CPU_PROFILES = []
 HEADROOM = 1.3
 LAPTOP_GB = 12  # estimate x headroom at or below this fits a typical laptop
 MIN_ADDED_GB = 0.05  # a run adding less than this over the overhead measures only imports
+# --check runs on the researcher's own machine: keep it a smoke test that cannot take it over.
+LOCAL_CAPS = {"wall_s": 120, "gb": 4.0, "workers": 2}
+THREAD_VARS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "RAYON_NUM_THREADS",
+)
 
 
 def _validate():
     """Fail fast with a clear message on a malformed edit block."""
     errors = []
+    if not isinstance(SMOKE, dict) or not SMOKE:
+        errors.append("SMOKE must be a dict of workflow arguments (a problem that runs in seconds)")
+    if WORKERS_ARG is not None and not isinstance(WORKERS_ARG, str):
+        errors.append("WORKERS_ARG must be an argument name or None")
     if not TIERS:
         errors.append("TIERS is empty")
     for label, problem in TIERS.items():
@@ -125,13 +153,53 @@ def _fmt_gb(gb):
     return f"{gb:.2g} GB" if gb < 10 else f"{gb:,.0f} GB"
 
 
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def load_profiles(client=None):
+    """Fill CPU_PROFILES from the deployment's ``compute_profiles()`` (CPU-only, smallest first)."""
+    global CPU_PROFILES  # pylint: disable=global-statement
+    if CPU_PROFILES:
+        return CPU_PROFILES
+    try:
+        if client is None:
+            from qiskit_ibm_catalog import (
+                ManagedWorkflowClient,
+            )  # pylint: disable=import-outside-toplevel
+
+            client = ManagedWorkflowClient(name=ACCOUNT)
+        catalog = list(client.compute_profiles())
+    except Exception as exc:  # pylint: disable=broad-except
+        sys.exit(
+            "scale_probe: could not list compute profiles with ManagedWorkflowClient()."
+            f"compute_profiles() ({exc.__class__.__name__}: {exc}). Machine choices need the "
+            "deployment's list: install qiskit-ibm-catalog>=0.22 and save an account (SKILL.md, Step 3)."
+        )
+    cpu = []
+    for prof in catalog:
+        cores, mem = _num(getattr(prof, "cpu", None)), _num(getattr(prof, "memory", None))
+        if getattr(prof, "gpu", None) or cores is None or mem is None:
+            continue
+        cpu.append((prof.compute_profile_id, int(cores), int(mem) if mem.is_integer() else mem))
+    if not cpu:
+        sys.exit("scale_probe: compute_profiles() returned no CPU profiles")
+    CPU_PROFILES = sorted(cpu, key=lambda p: (p[2], p[1]))
+    return CPU_PROFILES
+
+
 def _rungs(need_gb, cores):
     """Smallest CPU profile that fits, plus the next one up as a fallback."""
+    load_profiles()
     if need_gb <= LAPTOP_GB and cores <= 8:
         return "laptop", CPU_PROFILES[0][0]
-    fits = [p for p in CPU_PROFILES if p[2] >= need_gb and p[1] >= min(cores, 48)]
+    largest = CPU_PROFILES[-1]
+    fits = [p for p in CPU_PROFILES if p[2] >= need_gb and p[1] >= min(cores, largest[1])]
     if not fits:
-        return "48x768 (try it)", None
+        return f"{largest[0]} (try it)", None
     first = CPU_PROFILES.index(fits[0])
     fallback = CPU_PROFILES[first + 1][0] if first + 1 < len(CPU_PROFILES) else None
     return fits[0][0], fallback
@@ -254,25 +322,123 @@ def size(runs):
     return rows
 
 
-def check(label, runs_file):
-    """Run one tier locally under telemetry, print it, and append it to runs_file."""
-    _validate()
-    sys.path.insert(0, HERE)
-    from mw_telemetry import telemetry  # pylint: disable=import-outside-toplevel,import-error
+def _local_problem(label):
+    """SMOKE, or a tier small enough for the caps, with the worker count capped."""
+    problem = dict(SMOKE if label is None else TIERS[label])
+    if label is not None and MEMORY_GB(problem) * HEADROOM > LOCAL_CAPS["gb"]:
+        sys.exit(
+            f"scale_probe: tier {label!r} needs at least {_fmt_gb(MEMORY_GB(problem) * HEADROOM)} by "
+            f"the formula, over the {LOCAL_CAPS['gb']} GB local cap. Run it on Managed Workflows "
+            "(mw_sweep.py); --check alone runs SMOKE."
+        )
+    if WORKERS_ARG and isinstance(problem.get(WORKERS_ARG), int):
+        problem[WORKERS_ARG] = max(1, min(problem[WORKERS_ARG], LOCAL_CAPS["workers"]))
+    return problem
 
-    problem = TIERS[label]
-    with telemetry(heartbeat_s=60) as tel:
-        with tel.stage("work"):
-            work(**problem)
-    print(json.dumps(tel.summary))
+
+def _group_gb(pid):
+    """Resident memory of a process and all its descendants, or None without psutil."""
+    try:
+        import psutil  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return None
+    try:
+        root = psutil.Process(pid)
+        procs = [root, *root.children(recursive=True)]
+    except psutil.Error:
+        return 0.0
+    total = 0
+    for proc in procs:
+        try:
+            total += proc.memory_info().rss
+        except psutil.Error:
+            pass
+    return total / 1e9
+
+
+def _kill_group(proc):
+    """Kill the child and every process it started (pool workers included)."""
+    import signal  # pylint: disable=import-outside-toplevel
+
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def check(label, runs_file):
+    """Run SMOKE (or a small tier) once in a capped child process group; append it to runs_file."""
+    import subprocess  # pylint: disable=import-outside-toplevel
+    import tempfile  # pylint: disable=import-outside-toplevel
+
+    _validate()
+    cpus = os.cpu_count() or 2
+    if hasattr(os, "getloadavg") and os.getloadavg()[0] > cpus / 2:
+        sys.exit(
+            f"scale_probe: load average {os.getloadavg()[0]:.1f} on {cpus} CPUs; this machine is "
+            "already busy (an earlier run still going?). Not starting a local check."
+        )
+    problem = _local_problem(label)
+    env = {
+        **os.environ,
+        **{var: "1" for var in THREAD_VARS},
+        "MW_LOCAL_WORKERS": str(LOCAL_CAPS["workers"]),
+    }
+    if _group_gb(os.getpid()) is None:
+        print("note: psutil not installed, so the memory cap is not enforced; the time cap is")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = os.path.join(tmp, "summary.json")
+        cmd = [sys.executable, os.path.abspath(__file__), "_child", json.dumps(problem), out]
+        # own process group, so the whole tree (pool workers included) can be killed
+        with subprocess.Popen(cmd, env=env, start_new_session=True) as proc:
+            start, stopped = time.monotonic(), None
+            while proc.poll() is None:
+                elapsed = time.monotonic() - start
+                gb = _group_gb(proc.pid)
+                if elapsed > LOCAL_CAPS["wall_s"]:
+                    stopped = f"over {LOCAL_CAPS['wall_s']} s"
+                elif gb is not None and gb > LOCAL_CAPS["gb"]:
+                    stopped = f"over {LOCAL_CAPS['gb']} GB ({gb:.1f} GB)"
+                if stopped:
+                    _kill_group(proc)
+                    break
+                time.sleep(0.5)
+            proc.wait()
+            _kill_group(proc)  # workers left behind by a child that exited early
+        if stopped or not os.path.exists(out):
+            why = stopped or f"exit code {proc.returncode}"
+            sys.exit(
+                f"scale_probe: --check stopped ({why}) on {problem}. Make SMOKE smaller until it "
+                "runs in seconds; size larger problems on Managed Workflows (mw_sweep.py)."
+            )
+        with open(out, encoding="utf-8") as handle:
+            summary = json.load(handle)
+    print(json.dumps(summary))
     runs = []
     if os.path.exists(runs_file):
         with open(runs_file, encoding="utf-8") as handle:
             runs = json.load(handle)
-    runs.append({"problem": problem, "resources": tel.summary, "where": "local"})
+    runs.append({"problem": problem, "resources": summary, "where": "local"})
     with open(runs_file, "w", encoding="utf-8") as handle:
         json.dump(runs, handle, indent=1)
     print(f"appended to {runs_file}; {len(runs)} run(s) recorded")
+
+
+def _child(problem_json, out):
+    """Inside the capped child: run work() under telemetry and write the summary."""
+    if hasattr(os, "nice"):
+        os.nice(19)
+    sys.path.insert(0, HERE)
+    from mw_telemetry import telemetry  # pylint: disable=import-outside-toplevel,import-error
+
+    with telemetry(heartbeat_s=60) as tel:
+        with tel.stage("work"):
+            work(**json.loads(problem_json))
+    with open(out, "w", encoding="utf-8") as handle:
+        json.dump(tel.summary, handle)
 
 
 def estimate_only():
@@ -296,8 +462,10 @@ if __name__ == "__main__":
     ARGS = sys.argv[1:]
     if ARGS[:1] == ["--estimate"]:
         estimate_only()
+    elif ARGS[:1] == ["_child"]:
+        _child(ARGS[1], ARGS[2])
     elif ARGS[:1] == ["--check"]:
-        check(ARGS[1] if len(ARGS) > 1 else next(iter(TIERS)), os.path.join(HERE, "runs.json"))
+        check(ARGS[1] if len(ARGS) > 1 else None, os.path.join(HERE, "runs.json"))
     elif ARGS:
         with open(ARGS[0], encoding="utf-8") as fh:
             size(json.load(fh))

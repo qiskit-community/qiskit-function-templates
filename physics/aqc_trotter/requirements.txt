@@ -8,9 +8,8 @@
 # The pinned packages that are also baked into the Fleets runtime image
 # (qiskit-addon-aqc-tensor[quimb-jax], cotengrust, qiskit-aer) must match the
 # versions in
-# qiskit-serverless/docker-images/requirements-dynamic-dependencies.txt. Those
-# baked versions are bumping for the 0.38.0 image, so re-sync the pins below with
-# that file before this PR merges.
+# qiskit-serverless/docker-images/requirements-dynamic-dependencies.txt. The pins
+# below are in sync with the 0.38.0 image.
 
 qiskit~=2.5.0
 qiskit-serverless>=0.38.0
